@@ -979,12 +979,20 @@
 
     function borrowKeySig() {
       if (!keySig || keySig.parentNode === leftHead) return;
+      // The control also carries Bootstrap's `row` class, which the site styles
+      // with `body.hymn .common-panel:first-child .row { margin-top: 20px }`.
+      // A top margin is applied before flex centring, so it would sit ~10px
+      // below the language label and stretch the heading. Dropping the class
+      // while borrowed is cleaner than out-specifying that rule; it goes back
+      // on return, leaving the site's own layout untouched.
+      if (keySigHadRow) keySig.classList.remove('row');
       leftHead.appendChild(keySig);
     }
 
     function returnKeySig() {
       if (!keySig || !keySigHome || keySig.parentNode !== leftHead) return;
       keySigHome.parentNode.insertBefore(keySig, keySigHome);
+      if (keySigHadRow) keySig.classList.add('row');
       keySig.classList.toggle('hidden', currentFormat() !== 'chords');
     }
 
