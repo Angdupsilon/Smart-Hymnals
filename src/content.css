@@ -36,6 +36,14 @@
   font-weight: 700;
 }
 
+/* Chords, Piano and Guitar have no second-language equivalent, so the button
+ * greys out there rather than disappearing -- keeping the row from reflowing
+ * and leaving the tooltip to explain why. */
+.hn-multi-btn.btn.btn-default[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* On narrow screens the format group already wraps; keep the button aligned. */
 @media (max-width: 480px) {
   .btn-group.hn-multi-group {
@@ -92,6 +100,29 @@
   border-color: var(--button-primary-background, #337ab7);
   outline: 2px solid var(--button-primary-background, #337ab7);
   outline-offset: 1px;
+}
+
+/* Smart align sits beside the language menu, and only appears when one of the
+ * two columns is Chinese. */
+.hn-smart {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 0 12px;
+  font-size: 13px;
+  font-weight: normal;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--hymn-main-color, #333);
+}
+
+.hn-smart-box {
+  margin: 0;
+  cursor: pointer;
+}
+
+.hn-smart-text {
+  user-select: none;
 }
 
 /* Status line spans both columns. */

@@ -11,6 +11,10 @@
  * online; a plain <span> is a number with no page to link to. The sidebar
  * "Languages" list is used only to pick up query-string variants of those same
  * pages (Hymnal.net serves Simplified Chinese as `?gb=1`).
+ *
+ * The view mirrors whichever of the site's two text modes is active: Text, or
+ * Text+ which repeats the chorus after every stanza. It is unavailable in the
+ * Chords, Piano and Guitar modes, which have no second-language equivalent.
  */
 
 (function () {
@@ -19,7 +23,9 @@
   if (window.__hymnalMultilingualLoaded) return;
   window.__hymnalMultilingualLoaded = true;
 
-  var STORAGE_KEY = 'hymnalPreferredLanguage';
+  var PREF_KEY = 'hymnalMultilingualPrefs';
+  var TEXT_FORMATS = ['text', 'textplus'];
+  var ALL_FORMATS = ['text', 'textplus', 'chords', 'piano', 'guitar'];
   var pageCache = new Map();
 
   /* ------------------------------------------------------------------ *
@@ -64,14 +70,16 @@
   }
 
   /**
-   * Collect the stanzas of a hymn document. Rows marked `js-duplicate-row` are
-   * the repeated choruses that Hymnal.net only reveals in "Text+" mode; they
-   * are skipped so both columns show the hymn in its default shape.
+   * Collect the stanzas of a hymn document.
+   *
+   * Rows marked `js-duplicate-row` are the repeated choruses that the site
+   * reveals only in Text+ mode, so `withRepeats` decides whether to keep them
+   * and the panel matches whichever mode the page is in.
    *
    * Each stanza gets a key -- "v3" for verse 3, "c0" for the first chorus --
    * which is what lets two languages with different verse counts line up.
    */
-  function parseStanzas(root) {
+  function parseStanzas(root, withRepeats) {
     var article = root.querySelector('article.js-stanzas');
     if (!article) return null;
 
@@ -81,7 +89,7 @@
 
     for (var i = 0; i < nodes.length; i++) {
       var node = nodes[i];
-      if (node.classList.contains('js-duplicate-row')) continue;
+      if (!withRepeats && node.classList.contains('js-duplicate-row')) continue;
 
       var textEl = node.querySelector('.text-container');
       if (!textEl) continue;
@@ -146,6 +154,106 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * Smart alignment
+   *
+   * Chinese sets the same thought in more, shorter lines than English: verse 1
+   * of hymn 787 is four English lines against seven Chinese ones, because a
+   * single English line is often carried by a comma-joined pair such as
+   * "我所有苦況，" + "必須告訴主，". Merging those pairs back together makes the
+   * two columns line up thought for thought.
+   *
+   * Which pairs to merge is chosen by weighing the lines rather than guessing
+   * from punctuation alone -- every line here ends in a comma, so punctuation
+   * cannot tell the joins from the breaks. Instead the Chinese lines are cut
+   * into exactly as many groups as there are lines opposite, picking the cut
+   * that makes each group's share of the stanza closest to the share of the
+   * line it faces. Punctuation then acts as a guard rail: a full stop or
+   * semicolon ends a thought, so merging across one is penalised heavily.
+   * ------------------------------------------------------------------ */
+
+  /** Rough spoken weight of a line: characters, ignoring punctuation. */
+  function lineWeight(text) {
+    var stripped = text.replace(/[\s，。；：！？、,.;:!?'"‘’“”()（）\-—]/g, '');
+    return stripped.length || 1;
+  }
+
+  /** How costly it is to merge the line ending in this text into the next. */
+  function mergePenalty(text, total) {
+    var trimmed = text.replace(/\s+$/, '');
+    var last = trimmed.charAt(trimmed.length - 1);
+    if ('。！？.!?'.indexOf(last) !== -1 && last !== '') return Math.pow(0.40 * total, 2);
+    if ('；;'.indexOf(last) !== -1 && last !== '') return Math.pow(0.15 * total, 2);
+    return 0;
+  }
+
+  /**
+   * Merge `lines` into exactly `other.length` groups, matching each group's
+   * weight to the corresponding line opposite. Returns the merged lines, or
+   * the originals when there is nothing to gain.
+   */
+  function smartMerge(lines, other) {
+    var groups = other.length;
+    var n = lines.length;
+    if (!groups || n <= groups) return lines;
+
+    var w = lines.map(lineWeight);
+    var total = w.reduce(function (a, b) { return a + b; }, 0);
+    var otherWeights = other.map(lineWeight);
+    var otherTotal = otherWeights.reduce(function (a, b) { return a + b; }, 0) || 1;
+
+    // What each group should weigh, as its opposite's share of the stanza.
+    var target = otherWeights.map(function (x) { return x / otherTotal * total; });
+
+    var i, k, a, b;
+    var prefix = [0];
+    for (i = 0; i < n; i++) prefix.push(prefix[i] + w[i]);
+
+    // penaltyPrefix[i] = cost of merging across every boundary before line i.
+    var penaltyPrefix = [0];
+    for (i = 1; i <= n - 1; i++) {
+      penaltyPrefix[i] = penaltyPrefix[i - 1] + mergePenalty(lines[i - 1], total);
+    }
+
+    var dp = [];
+    var back = [];
+    for (k = 0; k <= groups; k++) {
+      dp.push(new Array(n + 1).fill(Infinity));
+      back.push(new Array(n + 1).fill(-1));
+    }
+    dp[0][0] = 0;
+
+    for (k = 1; k <= groups; k++) {
+      for (b = k; b <= n - (groups - k); b++) {
+        for (a = k - 1; a < b; a++) {
+          if (dp[k - 1][a] === Infinity) continue;
+          var diff = (prefix[b] - prefix[a]) - target[k - 1];
+          var cost = dp[k - 1][a] + diff * diff + (penaltyPrefix[b - 1] - penaltyPrefix[a]);
+          if (cost < dp[k][b]) {
+            dp[k][b] = cost;
+            back[k][b] = a;
+          }
+        }
+      }
+    }
+
+    if (dp[groups][n] === Infinity) return lines;
+
+    var cuts = [];
+    var end = n;
+    for (k = groups; k >= 1; k--) {
+      var start = back[k][end];
+      cuts.unshift([start, end]);
+      end = start;
+    }
+
+    // Chinese runs without spaces, and the comma each line already ends with
+    // does the separating, so the pieces join directly.
+    return cuts.map(function (cut) {
+      return lines.slice(cut[0], cut[1]).join('');
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
    * Language discovery
    * ------------------------------------------------------------------ */
 
@@ -162,7 +270,24 @@
   }
 
   function isSimplified(url) {
-    return new URL(url).searchParams.get('gb') === '1';
+    return new URL(url, location.href).searchParams.get('gb') === '1';
+  }
+
+  /** The hymnal a URL belongs to: "h" English, "ch" Chinese, "ht" Tagalog... */
+  function collectionOf(url) {
+    var match = new URL(url, location.href).pathname.match(/\/hymn\/([^\/]+)\//);
+    return match ? match[1] : '';
+  }
+
+  function describe(url, label, code) {
+    return {
+      url: url,
+      label: label,
+      code: code,
+      collection: collectionOf(url),
+      gb: isSimplified(url),
+      chinese: collectionOf(url) === 'ch'
+    };
   }
 
   /**
@@ -186,7 +311,7 @@
 
       var url = absolute(href);
       var label = (a.getAttribute('title') || '').trim() || a.textContent.trim();
-      var entry = { url: url, label: label, code: a.textContent.trim() };
+      var entry = describe(url, label, a.textContent.trim());
       byUrl.set(url, entry);
       paths.set(new URL(url).pathname, entry);
     }
@@ -209,9 +334,9 @@
         // Same page, different script. Qualify both so the toggle is unambiguous.
         var stem = base.label;
         base.label = stem + ' (Traditional)';
-        byUrl.set(full, { url: full, label: stem + ' (Simplified)', code: base.code });
+        byUrl.set(full, describe(full, stem + ' (Simplified)', base.code));
       } else {
-        byUrl.set(full, { url: full, label: link.textContent.trim(), code: base.code });
+        byUrl.set(full, describe(full, link.textContent.trim(), base.code));
       }
     }
 
@@ -219,12 +344,34 @@
   }
 
   /** The language of the page we are already on, for the left-hand heading. */
-  function currentLanguageLabel() {
+  function currentSide() {
     var active = document.querySelector('.hymn-nums .label-success');
     var label = active ? (active.getAttribute('title') || '').trim() : '';
     if (!label) label = 'Original';
     if (isSimplified(location.href)) label += ' (Simplified)';
-    return label;
+    return describe(location.href, label, active ? active.textContent.trim() : '');
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Lyrics format
+   * ------------------------------------------------------------------ */
+
+  /** Which of the site's five lyric modes is showing. */
+  function currentFormat() {
+    var active = document.querySelector('.lyrics-format button.active');
+    if (active) {
+      for (var i = 0; i < ALL_FORMATS.length; i++) {
+        if (active.classList.contains(ALL_FORMATS[i])) return ALL_FORMATS[i];
+      }
+    }
+    try {
+      if (ALL_FORMATS.indexOf(localStorage.lyricsFormat) !== -1) return localStorage.lyricsFormat;
+    } catch (e) { /* localStorage may be unavailable */ }
+    return 'text';
+  }
+
+  function isTextFormat(format) {
+    return TEXT_FORMATS.indexOf(format) !== -1;
   }
 
   /* ------------------------------------------------------------------ *
@@ -241,12 +388,13 @@
       })
       .then(function (html) {
         var doc = new DOMParser().parseFromString(html, 'text/html');
-        var stanzas = parseStanzas(doc);
-        if (!stanzas) throw new Error('No lyrics found on that page.');
+        var plain = parseStanzas(doc, false);
+        if (!plain) throw new Error('No lyrics found on that page.');
 
         var titleEl = doc.querySelector('#song-title, #song-title-xs');
         var data = {
-          stanzas: stanzas,
+          text: plain,
+          textplus: parseStanzas(doc, true) || plain,
           title: titleEl ? titleEl.textContent.trim() : ''
         };
         pageCache.set(url, data);
@@ -255,30 +403,34 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Preference storage
+   * Preferences
+   *
+   * The language is remembered by hymnal ("ch" plus the Simplified flag)
+   * rather than by its display name, so the choice carries to the next hymn
+   * even when that hymn labels the option differently.
    * ------------------------------------------------------------------ */
 
-  function readPreference() {
+  function readPrefs() {
     return new Promise(function (resolve) {
       try {
-        chrome.storage.local.get(STORAGE_KEY, function (items) {
-          if (chrome.runtime.lastError) return resolve('');
-          resolve((items && items[STORAGE_KEY]) || '');
+        chrome.storage.local.get(PREF_KEY, function (items) {
+          if (chrome.runtime.lastError) return resolve({});
+          resolve((items && items[PREF_KEY]) || {});
         });
       } catch (e) {
-        resolve('');
+        resolve({});
       }
     });
   }
 
-  function writePreference(label) {
+  function writePrefs(prefs) {
     try {
       var payload = {};
-      payload[STORAGE_KEY] = label;
+      payload[PREF_KEY] = prefs;
       chrome.storage.local.set(payload, function () {
         void chrome.runtime.lastError;
       });
-    } catch (e) { /* storage unavailable; preference simply is not persisted */ }
+    } catch (e) { /* storage unavailable; preferences simply are not persisted */ }
   }
 
   /* ------------------------------------------------------------------ *
@@ -292,7 +444,7 @@
     return node;
   }
 
-  function renderStanza(stanza) {
+  function renderStanza(stanza, lines) {
     var cell = el('div', 'hn-cell');
     if (!stanza) {
       cell.classList.add('hn-cell-empty');
@@ -306,8 +458,8 @@
     cell.appendChild(marker);
 
     var body = el('div', 'hn-text' + (stanza.type === 'chorus' ? ' hn-chorus' : ''));
-    for (var i = 0; i < stanza.lines.length; i++) {
-      body.appendChild(el('div', 'hn-line', stanza.lines[i] || ' '));
+    for (var i = 0; i < lines.length; i++) {
+      body.appendChild(el('div', 'hn-line', lines[i] || ' '));
     }
     cell.appendChild(body);
     return cell;
@@ -321,7 +473,7 @@
     var languages = discoverLanguages();
     if (!languages.length) return; // nothing to compare against
 
-    var originalLabel = currentLanguageLabel();
+    var here = currentSide();
 
     /* -------- the Multilingual button -------- *
      * Deliberately placed outside `.lyrics-format`: Hymnal.net binds its own
@@ -344,11 +496,10 @@
      * `.hymn-content > div` whenever a format button is pressed.
      */
     var panel = el('div', 'hn-multi-panel hn-hidden');
-
     var grid = el('div', 'hn-grid');
 
     var leftHead = el('div', 'hn-head hn-head-left');
-    leftHead.appendChild(el('span', 'hn-head-label', originalLabel));
+    leftHead.appendChild(el('span', 'hn-head-label', here.label));
 
     var rightHead = el('div', 'hn-head hn-head-right');
     var select = el('select', 'hn-select');
@@ -359,6 +510,15 @@
       select.appendChild(option);
     }
     rightHead.appendChild(select);
+
+    var smartWrap = el('label', 'hn-smart hn-hidden');
+    var smartBox = document.createElement('input');
+    smartBox.type = 'checkbox';
+    smartBox.className = 'hn-smart-box';
+    smartWrap.appendChild(smartBox);
+    smartWrap.appendChild(el('span', 'hn-smart-text', 'Smart align'));
+    smartWrap.title = 'Merge short Chinese lines so they line up with the longer lines opposite.';
+    rightHead.appendChild(smartWrap);
 
     var status = el('div', 'hn-status');
     var body = el('div', 'hn-body');
@@ -373,9 +533,34 @@
 
     /* -------- behaviour -------- */
 
-    var originalStanzas = parseStanzas(document);
     var isOpen = false;
     var requestToken = 0;
+    var originalByMode = {};
+
+    function selected() {
+      return languages.filter(function (l) { return l.url === select.value; })[0] || languages[0];
+    }
+
+    /** Which column holds Chinese, if either. Null means no smart align. */
+    function chineseSide() {
+      if (here.chinese) return 'left';
+      if (selected() && selected().chinese) return 'right';
+      return null;
+    }
+
+    function refreshSmartToggle() {
+      smartWrap.classList.toggle('hn-hidden', chineseSide() === null);
+    }
+
+    function mode() {
+      return currentFormat() === 'textplus' ? 'textplus' : 'text';
+    }
+
+    function originalStanzas() {
+      var m = mode();
+      if (!originalByMode[m]) originalByMode[m] = parseStanzas(document, m === 'textplus');
+      return originalByMode[m];
+    }
 
     function setStatus(message, isError) {
       status.textContent = message || '';
@@ -385,16 +570,32 @@
 
     function render(translation) {
       body.textContent = '';
-      var rows = alignStanzas(originalStanzas, translation.stanzas);
+
+      var rows = alignStanzas(originalStanzas(), translation[mode()]);
+      var side = smartBox.checked ? chineseSide() : null;
+
       for (var r = 0; r < rows.length; r++) {
+        var left = rows[r][0];
+        var right = rows[r][1];
+
+        // Merging needs both sides present to know how many lines to aim for.
+        var leftLines = left ? left.lines : [];
+        var rightLines = right ? right.lines : [];
+        if (side === 'left' && left && right) {
+          leftLines = smartMerge(left.lines, right.lines);
+        } else if (side === 'right' && left && right) {
+          rightLines = smartMerge(right.lines, left.lines);
+        }
+
         var row = el('div', 'hn-row');
-        row.appendChild(renderStanza(rows[r][0]));
-        row.appendChild(renderStanza(rows[r][1]));
+        row.appendChild(renderStanza(left, leftLines));
+        row.appendChild(renderStanza(right, rightLines));
         body.appendChild(row);
       }
     }
 
-    function show(url) {
+    function show() {
+      var url = select.value;
       var token = ++requestToken;
       setStatus('Loading translation…', false);
 
@@ -412,19 +613,16 @@
     }
 
     function open() {
-      if (!originalStanzas) {
-        originalStanzas = parseStanzas(document);
-        if (!originalStanzas) {
-          setStatus('No lyrics found on this page.', true);
-          return;
-        }
+      if (!originalStanzas()) {
+        setStatus('No lyrics found on this page.', true);
+        return;
       }
       isOpen = true;
       button.classList.add('hn-on');
       button.setAttribute('aria-pressed', 'true');
       hymnContent.classList.add('hn-hidden');
       panel.classList.remove('hn-hidden');
-      show(select.value);
+      show();
     }
 
     function close() {
@@ -436,32 +634,77 @@
       panel.classList.add('hn-hidden');
     }
 
+    /**
+     * Keep in step with the site's format buttons. Text and Text+ both have a
+     * two-column equivalent, so the panel stays open and re-renders; the sheet
+     * music modes do not, so it closes and the button greys out.
+     */
+    function syncFormat() {
+      var allowed = isTextFormat(currentFormat());
+      button.disabled = !allowed;
+      button.title = allowed ? '' : 'Multilingual view is available in Text and Text+ mode.';
+      if (!allowed) {
+        if (isOpen) close();
+      } else if (isOpen) {
+        show();
+      }
+    }
+
     button.addEventListener('click', function (event) {
       event.preventDefault();
+      if (button.disabled) return;
       if (isOpen) close(); else open();
     });
 
     select.addEventListener('change', function () {
-      var chosen = languages.filter(function (l) { return l.url === select.value; })[0];
-      if (chosen) writePreference(chosen.label);
-      if (isOpen) show(select.value);
+      refreshSmartToggle();
+      savePrefs();
+      if (isOpen) show();
     });
 
-    // Switching to Text / Chords / Piano / Guitar returns to the normal view
-    // rather than leaving two competing lyric displays on screen.
+    smartBox.addEventListener('change', function () {
+      savePrefs();
+      if (isOpen) show();
+    });
+
+    // The site's own handler runs first and sets `.active`, so by the time this
+    // fires `currentFormat()` already reports the newly chosen mode.
     var formatButtons = document.querySelectorAll('.lyrics-format button');
     for (var b = 0; b < formatButtons.length; b++) {
-      formatButtons[b].addEventListener('click', function () {
-        if (isOpen) close();
+      formatButtons[b].addEventListener('click', syncFormat);
+    }
+
+    function savePrefs() {
+      var choice = selected();
+      writePrefs({
+        collection: choice ? choice.collection : '',
+        gb: choice ? choice.gb : false,
+        label: choice ? choice.label : '',
+        smartAlign: smartBox.checked
       });
     }
 
-    // Re-select whatever language was chosen last time, when it is offered here.
-    readPreference().then(function (preferred) {
-      if (!preferred) return;
-      var match = languages.filter(function (l) { return l.label === preferred; })[0];
+    // Restore the language and smart-align setting chosen on a previous hymn.
+    readPrefs().then(function (prefs) {
+      if (prefs && prefs.smartAlign) smartBox.checked = true;
+
+      var match = null;
+      if (prefs && prefs.collection) {
+        match = languages.filter(function (l) {
+          return l.collection === prefs.collection && !!l.gb === !!prefs.gb;
+        })[0];
+      }
+      if (!match && prefs && prefs.label) {
+        match = languages.filter(function (l) { return l.label === prefs.label; })[0];
+      }
       if (match) select.value = match.url;
+
+      refreshSmartToggle();
+      if (isOpen) show();
     });
+
+    refreshSmartToggle();
+    syncFormat();
   }
 
   build();
