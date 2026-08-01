@@ -1,5 +1,5 @@
 /*
- * Hymnal.net Multilingual Lyrics -- feedback relay.
+ * Smart Hymnals -- feedback relay.
  *
  * The content script hands feedback here rather than posting it itself, for
  * two reasons: a request made from the service worker is not subject to
@@ -67,7 +67,7 @@ function submitFeedback(payload, sender) {
       message: message,
       page: page,
       version: chrome.runtime.getManifest().version,
-      _subject: 'Hymnal.net Multilingual feedback'
+      _subject: 'Smart Hymnals feedback'
     };
     if (email) body.email = email;
 

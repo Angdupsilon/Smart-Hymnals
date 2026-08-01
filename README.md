@@ -1,10 +1,18 @@
-# Hymnal.net Multilingual Lyrics
+# Smart Hymnals
 
-A Chrome extension that adds a **Multilingual** button to hymn pages on
-[hymnal.net](https://www.hymnal.net). Clicking it shows the hymn's lyrics in two
-columns — the page's own language on the left, a translation on the right — with
-a dropdown above the right column for choosing among the translations that hymn
-actually has.
+A Chrome extension that adds smart tools to hymn pages on
+[hymnal.net](https://www.hymnal.net):
+
+- **Multilingual lyrics** — a button beside the site's Text / Text+ / Chords /
+  Piano / Guitar controls shows the hymn in two columns: the page's own language
+  on the left, any available translation on the right, chosen with a dropdown
+  above the right column.
+- **Repeat chords** — carries the chords printed over verse 1 through every
+  stanza of the hymn, whether or not the multilingual view is open.
+- **Smart align** — merges Chinese lines so the columns read across line for
+  line against an English translation.
+- **Transposing** — the site's key control keeps working, retuning both columns
+  and any repeated stanzas at once.
 
 ## Installing
 
@@ -300,7 +308,7 @@ The extension is Manifest V3, contains no remote code, and requests a single
 low-risk permission, which is what the review process cares about. To package:
 
 ```bash
-zip -r hymnal-multilingual.zip manifest.json src icons -x '*.DS_Store'
+zip -r smart-hymnals.zip manifest.json src icons -x '*.DS_Store'
 ```
 
 Upload that zip in the Developer Dashboard. For the privacy section, declare no

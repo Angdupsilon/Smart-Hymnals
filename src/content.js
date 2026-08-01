@@ -1,10 +1,12 @@
 /*
- * Hymnal.net Multilingual Lyrics
+ * Smart Hymnals
  *
- * Adds a "Multilingual" button next to the Text / Text+ / Chords / Piano / Guitar
- * group on a hymn page. Clicking it swaps the single-column lyrics for a two
- * column view: the page's own language on the left, a translation on the right,
- * chosen with a toggle that sits above the right-hand column.
+ * Adds smart tools to a hymn page: a "Multilingual" button next to the
+ * Text / Text+ / Chords / Piano / Guitar group, chords repeated through every
+ * stanza, and Chinese-English line alignment. Clicking the button swaps the
+ * single-column lyrics for a two-column view: the page's own language on the
+ * left, a translation on the right, chosen with a toggle that sits above the
+ * right-hand column.
  *
  * Translations are discovered from the coloured hymn-number badges under the
  * title (`.hymn-nums`). A badge rendered as an <a> is a translation that exists
@@ -1245,11 +1247,11 @@
   function buildFeedback() {
     var toggle = el('button', 'hn-fb-toggle', 'Feedback');
     toggle.type = 'button';
-    toggle.title = 'Suggest an improvement to the Multilingual extension';
+    toggle.title = 'Suggest an improvement to Smart Hymnals';
     toggle.setAttribute('aria-expanded', 'false');
 
     var form = el('form', 'hn-fb-form hn-hidden');
-    form.appendChild(el('div', 'hn-fb-heading', 'Feedback on the Multilingual extension'));
+    form.appendChild(el('div', 'hn-fb-heading', 'Feedback on Smart Hymnals'));
 
     var message = el('textarea', 'hn-fb-message');
     message.rows = 4;
