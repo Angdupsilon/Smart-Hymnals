@@ -84,11 +84,36 @@
   cursor: not-allowed;
 }
 
-/* On narrow screens the format group already wraps; keep the button aligned. */
-@media (max-width: 480px) {
-  .btn-group.hn-multi-group {
+/* ---------- the extension's control strip ----------
+ * Everything this extension adds is grouped and set off from the site's own
+ * format buttons by a divider, so a reader can tell at a glance which controls
+ * belong to the extension and which to Hymnal.net. */
+.hn-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: 14px;
+  padding-left: 14px;
+  border-left: 1px solid var(--hymn-hr-color, #ccc);
+  vertical-align: middle;
+}
+
+.hn-controls .btn-group.hn-multi-group,
+.hn-controls .hn-toggle {
+  margin-left: 0;
+}
+
+/* On narrow screens the row already wraps; drop the divider so the strip does
+ * not look severed from what is now above it. */
+@media (max-width: 767px) {
+  .hn-controls {
     margin-left: 0;
-    margin-top: 8px;
+    margin-top: 10px;
+    padding-left: 0;
+    border-left: 0;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
   }
 }
 
@@ -304,31 +329,58 @@
 
 /* ---------- feedback ---------- */
 
-.hn-foot {
-  margin-top: 18px;
-  padding-top: 12px;
-  border-top: 1px solid var(--hymn-hr-color, #e5e5e5);
-}
-
+/* An outlined button rather than a text link: it has to be findable in a row
+ * of buttons, while staying quieter than Multilingual beside it. */
 .hn-fb-toggle {
-  background: none;
-  border: 0;
-  padding: 0;
+  padding: 5px 12px;
   font-size: 13px;
-  text-decoration: underline;
+  font-weight: 600;
+  line-height: 1.4;
   cursor: pointer;
+  border-radius: 4px;
   color: var(--link-color, #337ab7);
+  background: transparent;
+  border: 1px solid var(--button-border, #ccc);
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.hn-fb-toggle[disabled] {
-  text-decoration: none;
-  cursor: default;
-  opacity: 0.8;
+.hn-fb-toggle:hover {
+  border-color: var(--button-primary-background, #337ab7);
+  color: var(--button-primary-background, #337ab7);
 }
 
+.hn-fb-toggle.hn-on {
+  background-color: var(--button-primary-background, #337ab7);
+  border-color: var(--button-primary-border, #2e6da4);
+  color: var(--button-primary-color, #fff);
+}
+
+.hn-fb-toggle:focus-visible {
+  outline: 2px solid var(--button-primary-background, #337ab7);
+  outline-offset: 2px;
+}
+
+/* The form drops in under the strip that opened it, centred on the column but
+ * with its own contents left-aligned. */
 .hn-fb-form {
-  margin-top: 10px;
   max-width: 560px;
+  margin: 12px auto 4px;
+  padding: 14px;
+  text-align: left;
+  border: 1px solid var(--hymn-hr-color, #ddd);
+  border-radius: 6px;
+  background: var(--hymn-main-background, #fff);
+}
+
+.hn-fb-heading {
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--hymn-main-color, #333);
+}
+
+.hn-fb-ok {
+  color: #3c763d;
 }
 
 .hn-fb-message,

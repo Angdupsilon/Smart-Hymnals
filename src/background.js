@@ -13,7 +13,7 @@
  * in a new URL.
  */
 
-var FEEDBACK_ENDPOINT = ''; // e.g. 'https://formspree.io/f/xxxxxxxx' -- see README
+var FEEDBACK_ENDPOINT = 'https://formspree.io/f/mykrqzzv';
 
 var RATE_KEY = 'hymnalFeedbackRate';
 var MIN_GAP_MS = 60 * 1000;   // no more than one message a minute

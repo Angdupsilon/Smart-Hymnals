@@ -202,9 +202,14 @@ shape the site would.
 
 ## Feedback
 
-A **Send feedback** link at the foot of the panel opens a short form — message,
-optional email — that posts straight to you. The reader needs no account and no
-login anywhere.
+A **Feedback** button opens a short form — message, optional email — that posts
+straight to you. The reader needs no account and no login anywhere.
+
+It sits in the extension's own control strip, beside Multilingual and Repeat
+chords and divided off from Hymnal.net's format buttons, so it is easy to spot
+and reads as part of the extension rather than part of the site. It is there on
+every hymn page whether or not the multilingual view is open; the form drops in
+directly beneath the strip that opened it.
 
 ### Why Formspree
 
@@ -226,13 +231,14 @@ the form in Formspree and paste in a new id.
 
 ### Wiring it up
 
-1. Sign up at [formspree.io](https://formspree.io) and create a form.
-2. Copy the endpoint it gives you — `https://formspree.io/f/xxxxxxxx`.
-3. Put it in `FEEDBACK_ENDPOINT` at the top of [`src/background.js`](src/background.js).
-4. Reload the extension.
+`FEEDBACK_ENDPOINT` at the top of [`src/background.js`](src/background.js) is
+already set to `https://formspree.io/f/mykrqzzv`. To point it somewhere else,
+create a form at [formspree.io](https://formspree.io) and replace that value.
+Left blank, the Send button reports that feedback is not configured rather than
+failing silently.
 
-Until that constant is filled in, the Send button reports that feedback is not
-configured rather than failing silently.
+Formspree asks you to confirm the first submission to a new form by email, so
+send yourself one test message after loading the extension.
 
 ### How it is kept from being abused
 

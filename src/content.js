@@ -870,12 +870,26 @@
     repeatWrap.appendChild(el('span', null, 'Repeat chords'));
     repeatWrap.title = 'Carry the first stanza’s chords onto the later stanzas, matched syllable by syllable.';
 
-    if (formatRow && formatRow.parentNode) {
-      formatRow.parentNode.appendChild(group);
-      formatRow.parentNode.appendChild(repeatWrap);
+    /* Everything this extension adds is gathered into one strip, set off from
+     * the site's own format buttons by a divider, so it reads as belonging to
+     * the extension rather than to Hymnal.net. The feedback link sits here for
+     * the same reason -- and because down in the panel it was both hard to
+     * find and easy to mistake for part of the site. */
+    var controls = el('span', 'hn-controls');
+    controls.appendChild(group);
+    controls.appendChild(repeatWrap);
+
+    var feedback = buildFeedback();
+    controls.appendChild(feedback.toggle);
+
+    var row = formatRow && formatRow.parentNode ? formatRow.parentNode : null;
+    if (row) {
+      row.appendChild(controls);
+      // The form drops in directly under the strip that opened it.
+      row.parentNode.insertBefore(feedback.form, row.nextSibling);
     } else {
-      hymnContent.parentNode.insertBefore(group, hymnContent);
-      hymnContent.parentNode.insertBefore(repeatWrap, hymnContent);
+      hymnContent.parentNode.insertBefore(controls, hymnContent);
+      hymnContent.parentNode.insertBefore(feedback.form, hymnContent);
     }
 
     /* -------- the side-by-side panel -------- *
@@ -928,7 +942,6 @@
     grid.appendChild(status);
     grid.appendChild(body);
     panel.appendChild(grid);
-    panel.appendChild(buildFeedback());
 
     hymnContent.parentNode.insertBefore(panel, hymnContent.nextSibling);
 
@@ -1230,14 +1243,13 @@
    * ------------------------------------------------------------------ */
 
   function buildFeedback() {
-    var foot = el('div', 'hn-foot');
-
-    var toggle = el('button', 'hn-fb-toggle', 'Send feedback');
+    var toggle = el('button', 'hn-fb-toggle', 'Feedback');
     toggle.type = 'button';
+    toggle.title = 'Suggest an improvement to the Multilingual extension';
     toggle.setAttribute('aria-expanded', 'false');
-    foot.appendChild(toggle);
 
     var form = el('form', 'hn-fb-form hn-hidden');
+    form.appendChild(el('div', 'hn-fb-heading', 'Feedback on the Multilingual extension'));
 
     var message = el('textarea', 'hn-fb-message');
     message.rows = 4;
@@ -1274,13 +1286,15 @@
     form.appendChild(el('p', 'hn-fb-note',
       'Sends your message, this hymn’s address and the extension version. Nothing else, and nothing is stored in your browser.'));
 
-    foot.appendChild(form);
-
     toggle.addEventListener('click', function () {
       var opening = form.classList.contains('hn-hidden');
       form.classList.toggle('hn-hidden', !opening);
+      toggle.classList.toggle('hn-on', opening);
       toggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
-      if (opening) message.focus();
+      if (opening) {
+        form.scrollIntoView({ block: 'nearest' });
+        message.focus();
+      }
     });
 
     form.addEventListener('submit', function (event) {
@@ -1303,14 +1317,17 @@
         page: location.href
       };
 
+      // The toggle's label stays put on success. It sits in a row of buttons,
+      // and relabelling it would shift everything beside it.
       var done = function (response) {
-        send.disabled = false;
         if (response && response.ok) {
-          form.classList.add('hn-hidden');
-          toggle.textContent = 'Thanks — feedback sent';
-          toggle.disabled = true;
           message.value = '';
+          email.value = '';
+          send.disabled = true;
+          result.textContent = 'Thank you — that has been sent.';
+          result.className = 'hn-fb-result hn-fb-ok';
         } else {
+          send.disabled = false;
           result.textContent = (response && response.error) || 'Could not send. Please try again later.';
           result.className = 'hn-fb-result hn-error';
         }
@@ -1328,7 +1345,16 @@
       }
     });
 
-    return foot;
+    // Typing again after a successful send re-arms the button.
+    message.addEventListener('input', function () {
+      if (send.disabled && message.value.trim()) {
+        send.disabled = false;
+        result.textContent = '';
+        result.className = 'hn-fb-result';
+      }
+    });
+
+    return { toggle: toggle, form: form };
   }
 
   build();
