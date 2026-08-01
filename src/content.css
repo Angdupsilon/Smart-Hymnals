@@ -1,0 +1,200 @@
+/*
+ * Hymnal.net Multilingual Lyrics -- styles for the injected button and panel.
+ *
+ * All selectors are namespaced with `hn-` so nothing collides with the site's
+ * own Bootstrap classes. Colours are taken from the CSS custom properties
+ * Hymnal.net defines on `<html data-theme="light|dark">`, so the panel follows
+ * the site's theme toggle. Each var carries a light-mode fallback in case the
+ * site renames one.
+ */
+
+.hn-hidden {
+  display: none !important;
+}
+
+/* ---------- the Multilingual button ---------- */
+
+.btn-group.hn-multi-group {
+  margin-left: 10px;
+}
+
+.hn-multi-btn.btn.btn-default {
+  font-weight: 600;
+}
+
+/* The pressed state uses its own `hn-on` class rather than Bootstrap's
+ * `active`, because the site ships `.btn-default.active { background: ...
+ * !important }` which would otherwise override this and, in light mode,
+ * paint the button plain white -- indistinguishable from unpressed. The
+ * site's primary blue reads clearly as "on" in both themes. */
+.hn-multi-btn.btn.btn-default.hn-on,
+.hn-multi-btn.btn.btn-default.hn-on:hover,
+.hn-multi-btn.btn.btn-default.hn-on:focus {
+  background-color: var(--button-primary-background, #337ab7);
+  border-color: var(--button-primary-border, #2e6da4);
+  color: var(--button-primary-color, #fff);
+  font-weight: 700;
+}
+
+/* On narrow screens the format group already wraps; keep the button aligned. */
+@media (max-width: 480px) {
+  .btn-group.hn-multi-group {
+    margin-left: 0;
+    margin-top: 8px;
+  }
+}
+
+/* ---------- the side-by-side panel ---------- */
+
+.hn-multi-panel {
+  margin: 0 0 20px;
+  color: var(--hymn-main-color, #333);
+}
+
+.hn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 24px;
+}
+
+/* Headings take one column each and stay put while the lyrics scroll. The
+ * background must be opaque and match the panel behind the lyrics, otherwise
+ * text would show through as it scrolls underneath. */
+.hn-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 4px;
+  background: var(--hymn-main-background, #fff);
+  border-bottom: 2px solid var(--hymn-hr-color, #ccc);
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+}
+
+.hn-head-label {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--hymn-main-color, #333);
+}
+
+.hn-select {
+  max-width: 100%;
+  padding: 5px 8px;
+  font-size: 14px;
+  color: var(--form-control-color, #333);
+  background-color: var(--form-control-background, #fff);
+  border: 1px solid var(--button-border, #ccc);
+  border-radius: 4px;
+}
+
+.hn-select:focus {
+  border-color: var(--button-primary-background, #337ab7);
+  outline: 2px solid var(--button-primary-background, #337ab7);
+  outline-offset: 1px;
+}
+
+/* Status line spans both columns. */
+.hn-status {
+  grid-column: 1 / -1;
+  padding: 12px 4px;
+  color: var(--hymn-main-color, #666);
+  opacity: 0.75;
+  font-style: italic;
+}
+
+.hn-status.hn-error {
+  color: #d9534f;
+  opacity: 1;
+  font-style: normal;
+}
+
+/* The lyric rows span the grid; each row is its own two-column grid so a
+ * stanza and its translation share a top edge even at different lengths. */
+.hn-body {
+  grid-column: 1 / -1;
+}
+
+.hn-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 24px;
+  align-items: start;
+}
+
+.hn-cell {
+  display: flex;
+  align-items: flex-start;
+  padding: 12px 4px;
+}
+
+.hn-cell-empty {
+  min-height: 1px;
+}
+
+.hn-num {
+  flex: 0 0 34px;
+  padding-top: 1px;
+}
+
+.hn-num-badge {
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  line-height: 26px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--verse-num-color, #444);
+  background: var(--verse-num-background, #ddd);
+  border-radius: 50%;
+}
+
+.hn-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--hymn-main-color, #333);
+}
+
+.hn-chorus {
+  padding-left: 1.5em;
+}
+
+/* pre-wrap keeps the leading indentation that chorus lines carry as &nbsp;. */
+.hn-line {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 767px) {
+  .hn-grid,
+  .hn-row {
+    grid-template-columns: 1fr;
+    column-gap: 0;
+  }
+
+  .hn-head {
+    position: static;
+    min-height: 0;
+  }
+
+  /* Stacked, the pair reads as original-then-translation, so a rule separates
+   * one stanza pair from the next. */
+  .hn-row {
+    border-bottom: 1px solid var(--hymn-hr-color, #e5e5e5);
+    padding-bottom: 6px;
+    margin-bottom: 6px;
+  }
+
+  .hn-cell {
+    padding: 6px 4px;
+  }
+
+  .hn-cell-empty {
+    display: none;
+  }
+}
