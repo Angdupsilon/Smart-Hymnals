@@ -327,6 +327,26 @@
   white-space: pre;
 }
 
+/* "Repeat chords" draws these same line/group/segment divs into the page's own
+ * `.chord-container`, where two of the site's descendant selectors reach them:
+ * `.verse div` puts 20px under every div -- once for each of the three nested
+ * levels -- and `.verse div:first-child` puts 16px after each word, since a
+ * segment that ends on a space starts a new group. The site opts its own
+ * `.line` and `.chord-text` out the same way; these carry enough weight to
+ * outrank both of its rules. */
+body.hymn .hymn-content .lyrics .verse .chord-container.hn-injected .hn-cline,
+body.hymn .hymn-content .lyrics .verse .chord-container.hn-injected .hn-grp,
+body.hymn .hymn-content .lyrics .verse .chord-container.hn-injected .hn-seg {
+  padding: 0;
+}
+
+/* The panel sets its own line-height because it sits outside the site's type;
+ * on the page the stanzas have to keep step with the ones the site chorded
+ * itself, which take the document's own leading. */
+body.hymn .hymn-content .lyrics .verse .chord-container.hn-injected .hn-cline {
+  line-height: normal;
+}
+
 /* ---------- feedback ---------- */
 
 /* An outlined button rather than a text link: it has to be findable in a row

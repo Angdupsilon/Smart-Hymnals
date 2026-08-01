@@ -911,10 +911,11 @@
     // its retune reaches both columns at once.
     var keySig = document.querySelector('.hymn-content .key-sig');
     var keySigHome = null;
+    var keySigHadRow = false;
     if (keySig && keySig.parentNode) {
       keySigHome = document.createComment('hn-keysig');
       keySig.parentNode.insertBefore(keySigHome, keySig);
-      leftHead.appendChild(el('span', 'hn-keysig-slot'));
+      keySigHadRow = keySig.classList.contains('row');
     }
 
     var rightHead = el('div', 'hn-head hn-head-right');
