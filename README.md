@@ -19,19 +19,65 @@ the folder directly:
 The **Multilingual** button appears next to Text / Text+ / Chords / Piano /
 Guitar. It is only added when the hymn actually has a translation to show.
 
-## Text and Text+
+## Lyric modes
 
-The panel mirrors whichever of the site's two text modes is active, in both
-columns at once:
+The panel mirrors whichever of the site's lyric modes is active, in both columns
+at once:
 
 - **Text** — each stanza once, the chorus in its printed position.
 - **Text+** — the chorus repeated after every stanza, matching what the site
   does when it unhides its `js-duplicate-row` rows.
+- **Chords** — chords stacked over the words, in both languages.
 
-Switching between the two while the panel is open re-renders it in place. The
-button is greyed out in **Chords**, **Piano** and **Guitar**, which have no
-second-language equivalent; choosing one of those closes the panel and hands
-the page back to the site.
+Switching between them while the panel is open re-renders it in place. The
+button is greyed out only in **Piano** and **Guitar**, which are leadsheet
+images with no second-language equivalent; choosing one closes the panel and
+hands the page back to the site.
+
+## Repeat chords
+
+Hymnal.net prints chords over the first verse and the first chorus only — every
+later stanza repeats the bare words. **Repeat chords**, beside the format
+buttons, carries those chords through the whole hymn.
+
+It sits outside the panel on purpose: it works on the site's own single-column
+chord sheet whether or not the multilingual view is open, rewriting the later
+stanzas in place and restoring them exactly when switched off.
+
+Chords are placed by **syllable**, not by character position. Hymn stanzas share
+a metre — 787 is 10.9.10.9 — so the nth syllable of a line falls on the same
+note in every stanza. Verse 1 line 3 carries `A7 · D · A · Bm · D` on syllables
+0, 3, 5, 8, 9, and each later stanza receives them on its own syllables 0, 3, 5,
+8, 9:
+
+| | line |
+|---|---|
+| v1 | `[A7]In my dis[D]tress He [A]kindly will [Bm]help [D]me;` |
+| v2 | `[A7]If I but [D]ask Him, [A]He will de[Bm]li[D]ver,` |
+| v3 | `[A7]I must tell [D]Jesus, [A]I must tell [Bm]Je[D]sus;` |
+| v4 | `[A7]I must tell [D]Jesus; [A]He will e[Bm]nab[D]le` |
+
+Chinese is exact here — one character to a syllable. English is estimated from
+vowel groups, with the usual silent-`e` cases handled (`alone`, `loves`,
+`loved` are one syllable at the end; `table`, `roses`, `tempted` are not). The
+estimate does not have to be linguistically perfect, only *consistent*, since
+the same estimator reads the stanza the chords come from and the stanza they
+land on. Where it does drift, each chord is matched to the **nearest** syllable
+boundary rather than the preceding one, which absorbs an off-by-a-character
+split such as `dis|tress` against `dist|ress`.
+
+## Transposing
+
+The site's key up/down control keeps working while the panel is open — it is
+borrowed into the panel's heading and returned when the panel closes, so its own
+click handlers stay attached.
+
+Every chord this extension draws is tagged with the site's `chord` class, and
+the site transposes with a document-wide `$(".chord").each(...)`, so one press
+retunes both columns and any repeated stanzas at once. The one gap is the
+translation column: it is parsed from a separately fetched page, so its chords
+arrive in that page's printed key and are shifted to the current key before
+being drawn.
 
 ## Smart align (Chinese)
 
@@ -66,7 +112,7 @@ are stanzas with no counterpart opposite.
 
 ## Remembering your choice
 
-The chosen language and the Smart align setting are saved with
+The chosen language, Smart align and Repeat chords are saved with
 `chrome.storage.local` and restored on the next hymn you open.
 
 The language is remembered by hymnal — the `ch` in `/en/hymn/ch/572`, plus the
@@ -154,22 +200,71 @@ shape the site would.
   light-mode fallback in case one is renamed.
 - All injected classes are namespaced `hn-`.
 
+## Feedback
+
+A **Send feedback** link at the foot of the panel opens a short form — message,
+optional email — that posts straight to you. The reader needs no account and no
+login anywhere.
+
+### Why Formspree
+
+The requirement was: readers send feedback without signing in to anything, and
+it must not put the owner's account at risk. That rules most options out.
+
+| | verdict |
+|---|---|
+| **Formspree** | **Recommended.** Free tier ~50 messages/month. You get an opaque form id; your email address never appears in the extension. Real CORS + JSON API, so the form can report success or failure honestly. Spam filtering and a honeypot field are built in. |
+| GitHub issues | Rejected — needs the reader to have a GitHub account and be logged in. Creating issues on their behalf would mean shipping a personal access token inside a public extension: a credential with write access to your repos, extractable by anyone. Exactly the account compromise to avoid. |
+| `mailto:` | Rejected — publishes your address to scrapers, needs a configured mail client, and most readers abandon it. |
+| Google Forms | Workable fallback if you outgrow 50/month — free and unlimited, but submissions must be sent `no-cors`, so the page cannot tell whether it worked and would have to claim success blindly. |
+| Own backend / Worker | Most control, but something to host, secure and maintain for a feedback box. |
+
+The form id is write-only. Published in the extension it cannot read past
+submissions or reach your account — the worst case is unwanted posts to that one
+form, which is what the protections below are for. If it is ever abused, delete
+the form in Formspree and paste in a new id.
+
+### Wiring it up
+
+1. Sign up at [formspree.io](https://formspree.io) and create a form.
+2. Copy the endpoint it gives you — `https://formspree.io/f/xxxxxxxx`.
+3. Put it in `FEEDBACK_ENDPOINT` at the top of [`src/background.js`](src/background.js).
+4. Reload the extension.
+
+Until that constant is filled in, the Send button reports that feedback is not
+configured rather than failing silently.
+
+### How it is kept from being abused
+
+- **Posted from the service worker**, not the content script, so the request is
+  not subject to hymnal.net's page CSP and the endpoint is never visible to the
+  page.
+- **Honeypot** — a `_gotcha` field hidden off-screen. Bots fill it; Formspree
+  discards those. It is positioned away rather than `display:none` so a bot
+  filling every field still takes the bait.
+- **Rate limited** in the worker: one message a minute, ten a day.
+- **The page URL is taken from the sender tab**, not from the message body, and
+  only hymnal.net pages are accepted — so nothing on the page can forge it.
+- Message capped at 2000 characters; the email field is optional and validated.
+
 ## Permissions
 
-`storage` only — it remembers the language you last picked and whether Smart
-align was on, and restores both on the next hymn.
+- `storage` — remembers the language and toggles you last chose.
+- `host_permissions: https://formspree.io/*` — solely so the service worker can
+  post the feedback form. Remove both this and `src/background.js` if you drop
+  the feedback feature.
 
-There is no `host_permissions` entry. The content script runs only on
-`hymnal.net` hymn pages, and translations are same-origin requests, so no
-cross-origin access is needed. Nothing is collected, stored remotely, or sent
-anywhere.
+Translations are same-origin requests from a hymnal.net page, so they need no
+permission of their own. Nothing is collected or transmitted except a feedback
+message you type and send yourself.
 
 ## Layout
 
 ```
 manifest.json          MV3 manifest
-src/content.js         language discovery, fetching, alignment, rendering
+src/content.js         language discovery, fetching, alignment, chords, rendering
 src/content.css        panel and button styles, themed from the site's variables
+src/background.js      service worker; relays feedback, rate limits it
 icons/                 generated PNGs (16/32/48/128)
 tools/make_icons.py    regenerates icons/ (standard library only)
 ```
@@ -181,11 +276,17 @@ tools/make_icons.py    regenerates icons/ (standard library only)
   from another language's page.
 - The Portuguese translation lives on hinario.org and is not shown, since
   reading it would mean granting the extension access to a second site.
-- Only the Text and Text+ modes are mirrored — chords, piano and guitar
-  leadsheets are left to the site's own buttons.
+- Piano and guitar leadsheets are images, so they are left to the site's own
+  buttons.
 - Smart align only merges lines, so it can bring a longer Chinese stanza down to
   the line count opposite but cannot split a shorter one to match a longer
   translation.
+- English syllable splitting is a heuristic. Chords land on the right syllable,
+  but the letters a chord sits over can break a shade off inside a long word
+  (`e-nab-le` rather than `e-na-ble`). Chinese is exact.
+- Repeat chords assumes stanzas of a hymn share a metre, which is what makes one
+  tune fit them all. A hymn with an irregular stanza will place those chords
+  loosely.
 
 ## Publishing to the Chrome Web Store
 

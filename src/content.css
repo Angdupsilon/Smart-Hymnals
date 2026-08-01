@@ -18,22 +18,62 @@
   margin-left: 10px;
 }
 
-.hn-multi-btn.btn.btn-default {
-  font-weight: 600;
+/* Every colour and weight below is forced with !important, which is otherwise
+ * worth avoiding. The site ships
+ *
+ *   .btn-default:hover { background: var(--button-group-active-background)
+ *                          !important;
+ *                        font-weight: var(--button-group-active-font-weight)
+ *                          !important; }
+ *
+ * so merely hovering repaints the button in the site's grey and re-weights the
+ * text -- 700 in dark, 400 in light. That weight flip re-measures the label and
+ * nudges the button's width, which is what makes the hover snap. No amount of
+ * specificity beats an !important declaration, so these have to answer in kind.
+ *
+ * The weight is pinned to 600 in every state, leaving colour alone to carry the
+ * change, eased over a beat so hover and press read as one continuous motion. */
+.hn-multi-btn.btn.btn-default,
+.hn-multi-btn.btn.btn-default:hover,
+.hn-multi-btn.btn.btn-default:focus {
+  font-weight: 600 !important;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+              color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Unpressed hover: a blue outline rather than a fill, so the step up to the
+ * pressed state stays small. */
+.hn-multi-btn.btn.btn-default:hover:not([disabled]):not(.hn-on) {
+  background-color: var(--button-background, #fff) !important;
+  border-color: var(--button-primary-background, #337ab7) !important;
+  color: var(--button-primary-background, #337ab7) !important;
+  box-shadow: inset 0 0 0 1px var(--button-primary-background, #337ab7);
 }
 
 /* The pressed state uses its own `hn-on` class rather than Bootstrap's
- * `active`, because the site ships `.btn-default.active { background: ...
- * !important }` which would otherwise override this and, in light mode,
- * paint the button plain white -- indistinguishable from unpressed. The
- * site's primary blue reads clearly as "on" in both themes. */
-.hn-multi-btn.btn.btn-default.hn-on,
+ * `active`, because the site also ships `.btn-default.active { background: ...
+ * !important }` which in light mode paints the button plain white --
+ * indistinguishable from unpressed. Its primary blue reads clearly as "on" in
+ * both themes. */
+.hn-multi-btn.btn.btn-default.hn-on {
+  background-color: var(--button-primary-background, #337ab7) !important;
+  border-color: var(--button-primary-border, #2e6da4) !important;
+  color: var(--button-primary-color, #fff) !important;
+}
+
 .hn-multi-btn.btn.btn-default.hn-on:hover,
 .hn-multi-btn.btn.btn-default.hn-on:focus {
-  background-color: var(--button-primary-background, #337ab7);
-  border-color: var(--button-primary-border, #2e6da4);
-  color: var(--button-primary-color, #fff);
-  font-weight: 700;
+  background-color: var(--button-primary-border, #2e6da4) !important;
+  border-color: var(--button-primary-border, #2e6da4) !important;
+  color: var(--button-primary-color, #fff) !important;
+}
+
+/* Bootstrap's default focus ring is a dotted browser outline; this is calmer
+ * and matches the pressed colour. */
+.hn-multi-btn.btn.btn-default:focus,
+.hn-multi-btn.btn.btn-default:focus-visible {
+  outline: 2px solid var(--button-primary-background, #337ab7);
+  outline-offset: 2px;
 }
 
 /* Chords, Piano and Guitar have no second-language equivalent, so the button
@@ -102,9 +142,9 @@
   outline-offset: 1px;
 }
 
-/* Smart align sits beside the language menu, and only appears when one of the
- * two columns is Chinese. */
-.hn-smart {
+/* Toggles sit beside the language menu. Each appears only when it applies:
+ * Smart align when a column is Chinese, Repeat chords in Chords mode. */
+.hn-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -113,16 +153,33 @@
   font-weight: normal;
   white-space: nowrap;
   cursor: pointer;
+  user-select: none;
   color: var(--hymn-main-color, #333);
 }
 
-.hn-smart-box {
+.hn-toggle input {
   margin: 0;
   cursor: pointer;
 }
 
-.hn-smart-text {
-  user-select: none;
+/* "Repeat chords" sits beside the format buttons rather than in the panel,
+ * since it applies to the site's own chord sheet too. */
+.hn-page-toggle {
+  margin-left: 14px;
+  vertical-align: middle;
+}
+
+/* The borrowed transpose control, while it is living in the panel heading. */
+.hn-head .key-sig {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 0 14px;
+  padding: 0;
+}
+
+.hn-head .key-sig.hidden {
+  display: none;
 }
 
 /* Status line spans both columns. */
@@ -197,6 +254,135 @@
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow-wrap: break-word;
+}
+
+/* ---------- chords ----------
+ * The site's chord CSS is scoped under .hymn-content, which this panel sits
+ * outside of, so the stacked chord-over-word layout is rebuilt here: a line is
+ * a wrapping flex row of segments, and each segment stacks its chord above the
+ * words it covers. Segments align on their bottom edge so the lyrics keep a
+ * single baseline whether or not a chord sits above them. */
+.hn-cline {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  line-height: 1.5;
+}
+
+/* Segments that make up a single word are held in one group so the line can
+ * only wrap between words, never in the middle of one. */
+.hn-grp {
+  display: flex;
+  flex-wrap: nowrap;
+}
+
+.hn-seg {
+  display: flex;
+  flex-direction: column;
+}
+
+.hn-chord {
+  font-size: 13px;
+  line-height: 1.25;
+  min-height: 1.25em;
+  opacity: 0.65;
+  font-weight: 700;
+  white-space: pre;
+}
+
+/* Reserve a little room after a chord name so two chords falling on adjacent
+ * syllables cannot run together ("BmD"). Empty placeholders are left alone,
+ * so the lyrics keep their natural spacing. */
+.hn-chord:not(:empty) {
+  padding-right: 0.5em;
+}
+
+/* `pre` holds the spacing that positions each chord over its own syllable. */
+.hn-word {
+  white-space: pre;
+}
+
+/* ---------- feedback ---------- */
+
+.hn-foot {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hymn-hr-color, #e5e5e5);
+}
+
+.hn-fb-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  color: var(--link-color, #337ab7);
+}
+
+.hn-fb-toggle[disabled] {
+  text-decoration: none;
+  cursor: default;
+  opacity: 0.8;
+}
+
+.hn-fb-form {
+  margin-top: 10px;
+  max-width: 560px;
+}
+
+.hn-fb-message,
+.hn-fb-email {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--form-control-color, #333);
+  background-color: var(--form-control-background, #fff);
+  border: 1px solid var(--button-border, #ccc);
+  border-radius: 4px;
+  resize: vertical;
+}
+
+.hn-fb-message:focus,
+.hn-fb-email:focus {
+  border-color: var(--button-primary-background, #337ab7);
+  outline: 2px solid var(--button-primary-background, #337ab7);
+  outline-offset: 1px;
+}
+
+/* The honeypot has to be reachable by a bot filling in every field, so it is
+ * moved out of sight rather than set to display:none. */
+.hn-fb-gotcha {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.hn-fb-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hn-fb-result {
+  font-size: 13px;
+  color: var(--hymn-main-color, #666);
+}
+
+.hn-fb-result.hn-error {
+  color: #d9534f;
+}
+
+.hn-fb-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  opacity: 0.7;
+  color: var(--hymn-main-color, #666);
 }
 
 /* ---------- responsive ---------- */

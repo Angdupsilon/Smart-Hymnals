@@ -12,9 +12,9 @@
  * "Languages" list is used only to pick up query-string variants of those same
  * pages (Hymnal.net serves Simplified Chinese as `?gb=1`).
  *
- * The view mirrors whichever of the site's two text modes is active: Text, or
- * Text+ which repeats the chorus after every stanza. It is unavailable in the
- * Chords, Piano and Guitar modes, which have no second-language equivalent.
+ * The view mirrors whichever of the site's lyric modes is active -- Text,
+ * Text+ (chorus after every stanza) or Chords. Piano and Guitar are leadsheet
+ * images with no second-language equivalent, so the button greys out there.
  */
 
 (function () {
@@ -24,9 +24,12 @@
   window.__hymnalMultilingualLoaded = true;
 
   var PREF_KEY = 'hymnalMultilingualPrefs';
-  var TEXT_FORMATS = ['text', 'textplus'];
+  var SUPPORTED_FORMATS = ['text', 'textplus', 'chords'];
   var ALL_FORMATS = ['text', 'textplus', 'chords', 'piano', 'guitar'];
   var pageCache = new Map();
+
+  var CJK = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff]/;
+  var LETTER = /[A-Za-z\u00c0-\u024f'\u2019]/;
 
   /* ------------------------------------------------------------------ *
    * Lyric extraction
@@ -70,6 +73,54 @@
   }
 
   /**
+   * Read a `.chord-container` into lines of {chord, text} segments.
+   *
+   * The site writes a chorded line as a run of `.chord-text` blocks -- each
+   * holding a `.chord` span followed by the words it sits over -- interleaved
+   * with bare text for the stretches that carry no chord. Only the first verse
+   * and first chorus are marked up this way; every other stanza repeats the
+   * plain words, which is why `null` here means "this stanza has no chords".
+   */
+  function extractChordLines(container) {
+    var lineEls = container.querySelectorAll('.line');
+    if (!lineEls.length || !container.querySelector('.chord')) return null;
+
+    var lines = [];
+    for (var i = 0; i < lineEls.length; i++) {
+      var segments = [];
+
+      for (var j = 0; j < lineEls[i].childNodes.length; j++) {
+        var node = lineEls[i].childNodes[j];
+
+        if (node.nodeType === Node.TEXT_NODE) {
+          if (node.nodeValue) segments.push({ chord: '', text: clean(node.nodeValue) });
+          continue;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
+        if (node.classList && node.classList.contains('chord-text')) {
+          var chordEl = node.querySelector('.chord');
+          var text = '';
+          for (var k = 0; k < node.childNodes.length; k++) {
+            if (node.childNodes[k] !== chordEl) text += node.childNodes[k].textContent;
+          }
+          segments.push({ chord: chordEl ? chordEl.textContent.trim() : '', text: clean(text) });
+        } else {
+          segments.push({ chord: '', text: clean(node.textContent) });
+        }
+      }
+
+      if (segments.length) lines.push(segments);
+    }
+
+    return lines.length ? lines : null;
+  }
+
+  function clean(text) {
+    return text.replace(/\u00a0/g, ' ');
+  }
+
+  /**
    * Collect the stanzas of a hymn document.
    *
    * Rows marked `js-duplicate-row` are the repeated choruses that the site
@@ -100,6 +151,7 @@
       var type = node.getAttribute('data-type') || 'verse';
       var numEl = node.querySelector('.verse-num');
       var num = numEl ? numEl.textContent.trim() : '';
+      var chordEl = node.querySelector('.chord-container');
       var key;
 
       if (type === 'chorus') {
@@ -110,7 +162,13 @@
         key = 'x' + stanzas.length;
       }
 
-      stanzas.push({ type: type, num: num, lines: lines, key: key });
+      stanzas.push({
+        type: type,
+        num: num,
+        lines: lines,
+        key: key,
+        chordLines: chordEl ? extractChordLines(chordEl) : null
+      });
     }
 
     return stanzas.length ? stanzas : null;
@@ -154,6 +212,225 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * Syllables
+   *
+   * Hymn stanzas share a metre -- 787 is 10.9.10.9 -- so the nth syllable of
+   * a line falls on the same note in every stanza. That makes the syllable
+   * index the right coordinate for carrying chords from the first stanza to
+   * the rest. Chinese is exact here, one character to a syllable; English is
+   * estimated from vowel groups, which is approximate but self-consistent,
+   * since the same estimate is applied to the stanza the chords come from and
+   * the stanza they land on.
+   * ------------------------------------------------------------------ */
+
+  /** Offsets, within a word, where each syllable begins. */
+  function wordSyllableOffsets(word) {
+    var lower = word.toLowerCase();
+    var groups = [];
+    var re = /[aeiouy\u00e0-\u00fc]+/g;
+    var match;
+    while ((match = re.exec(lower))) groups.push([match.index, match.index + match[0].length]);
+    if (!groups.length) return [0];
+
+    // A trailing "e" is usually silent: "alone", "loves", "loved". It keeps a
+    // syllable of its own in "-le" words ("table"), in "-es" after a sibilant
+    // ("roses", "churches"), and in "-ed" after t or d ("tempted", "needed").
+    if (groups.length > 1) {
+      var last = groups[groups.length - 1];
+      var isBareE = last[1] - last[0] === 1 && lower.charAt(last[0]) === 'e';
+      var tail = lower.slice(last[1]);
+
+      if (isBareE && (tail === '' || tail === 's' || tail === 'd')) {
+        var stem = lower.slice(0, last[0]);
+        var keep;
+        if (tail === 's') {
+          keep = /(s|x|z|ch|sh|ge|ce)$/.test(stem);
+        } else if (tail === 'd') {
+          keep = /(t|d)$/.test(stem);
+        } else {
+          keep = /[^aeiouy]l$/.test(stem);
+        }
+        if (!keep) groups.pop();
+      }
+    }
+
+    var offsets = [0];
+    for (var i = 1; i < groups.length; i++) {
+      var clusterStart = groups[i - 1][1];
+      var nucleus = groups[i][0];
+      // The last consonant of the cluster opens the next syllable:
+      // "bur|dens", "a|lone", "Je|sus".
+      var boundary = nucleus > clusterStart ? nucleus - 1 : nucleus;
+      if (boundary <= offsets[offsets.length - 1]) boundary = offsets[offsets.length - 1] + 1;
+      if (boundary < lower.length) offsets.push(boundary);
+    }
+    return offsets;
+  }
+
+  /** Offsets, within a line, where each syllable begins. */
+  function syllableStarts(text) {
+    var starts = [];
+    var i = 0;
+    while (i < text.length) {
+      var ch = text.charAt(i);
+      if (CJK.test(ch)) {
+        starts.push(i);
+        i++;
+      } else if (LETTER.test(ch)) {
+        var j = i;
+        while (j < text.length && LETTER.test(text.charAt(j))) j++;
+        var offsets = wordSyllableOffsets(text.slice(i, j));
+        for (var k = 0; k < offsets.length; k++) starts.push(i + offsets[k]);
+        i = j;
+      } else {
+        i++;
+      }
+    }
+    return starts;
+  }
+
+  /** Chinese chord lines are set with a gap after each character, as the site does. */
+  function spaceCJK(text) {
+    var out = '';
+    for (var i = 0; i < text.length; i++) {
+      out += text.charAt(i);
+      if (CJK.test(text.charAt(i)) && i + 1 < text.length && CJK.test(text.charAt(i + 1))) out += ' ';
+    }
+    return out;
+  }
+
+  /**
+   * Re-hang the chords of `sourceSegments` over `targetText`, syllable for
+   * syllable. Returns segments for the target line, or null if there is
+   * nothing to hang.
+   */
+  function transferChords(sourceSegments, targetText) {
+    var sourceText = sourceSegments.map(function (s) { return s.text; }).join('');
+    var chords = [];
+    var offset = 0;
+
+    for (var i = 0; i < sourceSegments.length; i++) {
+      if (sourceSegments[i].chord) {
+        chords.push({ chord: sourceSegments[i].chord, offset: offset });
+      }
+      offset += sourceSegments[i].text.length;
+    }
+    if (!chords.length) return null;
+
+    var text = CJK.test(targetText) ? spaceCJK(targetText) : targetText;
+    var sourceStarts = syllableStarts(sourceText);
+    var targetStarts = syllableStarts(text);
+    if (!targetStarts.length) return null;
+
+    // Which syllable each chord sits on in the source, mapped to the same
+    // syllable in the target. Indices are kept strictly increasing so two
+    // chords never collapse onto one syllable.
+    var cuts = [];
+    var previous = -1;
+    for (i = 0; i < chords.length; i++) {
+      // Nearest syllable rather than the one before: a chord always sits on a
+      // real syllable boundary in the source, so when the estimate is off by a
+      // character or two ("dis|tress" against "dist|ress") the closest start is
+      // the intended one.
+      var index = 0;
+      for (var s = 1; s < sourceStarts.length; s++) {
+        if (Math.abs(sourceStarts[s] - chords[i].offset) < Math.abs(sourceStarts[index] - chords[i].offset)) {
+          index = s;
+        }
+      }
+      if (index <= previous) index = previous + 1;
+      if (index > targetStarts.length - 1) break;
+      previous = index;
+      cuts.push({ chord: chords[i].chord, offset: targetStarts[index] });
+    }
+    if (!cuts.length) return null;
+
+    var segments = [];
+    var position = 0;
+    for (i = 0; i < cuts.length; i++) {
+      if (cuts[i].offset > position) {
+        segments.push({ chord: '', text: text.slice(position, cuts[i].offset) });
+        position = cuts[i].offset;
+      }
+      var end = i + 1 < cuts.length ? cuts[i + 1].offset : text.length;
+      if (end < position) end = position;
+      segments.push({ chord: cuts[i].chord, text: text.slice(position, end) });
+      position = end;
+    }
+    if (position < text.length) segments.push({ chord: '', text: text.slice(position) });
+
+    return segments;
+  }
+
+  /**
+   * Hang a template stanza's chords over a set of plain lines, one output line
+   * per input line. A line the template has no chords for is still spaced out
+   * when it is Chinese, so the whole stanza is set the same way.
+   */
+  function buildChordLines(lines, templateLines) {
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var source = templateLines[i];
+      var segments = source ? transferChords(source, lines[i]) : null;
+      if (!segments) {
+        segments = [{ chord: '', text: CJK.test(lines[i]) ? spaceCJK(lines[i]) : lines[i] }];
+      }
+      out.push(segments);
+    }
+    return out;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Transposing
+   *
+   * The site's key buttons retune every `.chord` in the document, which covers
+   * what this extension renders too. The one gap is the translation column:
+   * it is parsed out of a separately fetched page, so its chords arrive in
+   * that page's own printed key and have to be shifted to whatever key this
+   * page is currently showing before they are drawn.
+   * ------------------------------------------------------------------ */
+
+  var SHARP_SCALE = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+  var FLAT_SCALE = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+  var FLAT_KEYS = ['F', 'B♭', 'E♭', 'A♭', 'D♭', 'G♭', 'C♭'];
+
+  function noteIndex(note) {
+    var base = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[note.charAt(0).toUpperCase()];
+    if (base === undefined) return -1;
+    var accidental = note.charAt(1);
+    if (accidental === '♯' || accidental === '#') base += 1;
+    else if (accidental === '♭' || accidental === 'b') base -= 1;
+    return (base + 12) % 12;
+  }
+
+  /** "D Major" -> the root note "D". */
+  function keyRoot(text) {
+    return (text || '').trim().split(/\s+/)[0] || '';
+  }
+
+  function transposeChordName(name, delta, useFlats) {
+    if (!name || !delta) return name;
+    var scale = useFlats ? FLAT_SCALE : SHARP_SCALE;
+    // Split on "/" so a slash chord's bass note moves with its root.
+    return name.split('/').map(function (part) {
+      return part.replace(/^(\s*)([A-G])([♯♭#b]?)/, function (whole, space, letter, accidental) {
+        var index = noteIndex(letter + accidental);
+        if (index < 0) return whole;
+        return space + scale[(index + delta) % 12];
+      });
+    }).join('/');
+  }
+
+  function transposeLines(chordLines, delta, useFlats) {
+    if (!chordLines || !delta) return chordLines;
+    return chordLines.map(function (segments) {
+      return segments.map(function (segment) {
+        return { chord: transposeChordName(segment.chord, delta, useFlats), text: segment.text };
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
    * Smart alignment
    *
    * Chinese sets the same thought in more, shorter lines than English: verse 1
@@ -181,20 +458,21 @@
   function mergePenalty(text, total) {
     var trimmed = text.replace(/\s+$/, '');
     var last = trimmed.charAt(trimmed.length - 1);
-    if ('。！？.!?'.indexOf(last) !== -1 && last !== '') return Math.pow(0.40 * total, 2);
-    if ('；;'.indexOf(last) !== -1 && last !== '') return Math.pow(0.15 * total, 2);
+    if (last === '') return 0;
+    if ('。！？.!?'.indexOf(last) !== -1) return Math.pow(0.40 * total, 2);
+    if ('；;'.indexOf(last) !== -1) return Math.pow(0.15 * total, 2);
     return 0;
   }
 
   /**
-   * Merge `lines` into exactly `other.length` groups, matching each group's
-   * weight to the corresponding line opposite. Returns the merged lines, or
-   * the originals when there is nothing to gain.
+   * Choose how to group `lines` into exactly `other.length` runs, matching each
+   * run's weight to the line it will face. Returns [start, end) pairs, or null
+   * when there is nothing to gain.
    */
-  function smartMerge(lines, other) {
+  function smartCuts(lines, other) {
     var groups = other.length;
     var n = lines.length;
-    if (!groups || n <= groups) return lines;
+    if (!groups || n <= groups) return null;
 
     var w = lines.map(lineWeight);
     var total = w.reduce(function (a, b) { return a + b; }, 0);
@@ -236,7 +514,7 @@
       }
     }
 
-    if (dp[groups][n] === Infinity) return lines;
+    if (dp[groups][n] === Infinity) return null;
 
     var cuts = [];
     var end = n;
@@ -245,12 +523,7 @@
       cuts.unshift([start, end]);
       end = start;
     }
-
-    // Chinese runs without spaces, and the comma each line already ends with
-    // does the separating, so the pieces join directly.
-    return cuts.map(function (cut) {
-      return lines.slice(cut[0], cut[1]).join('');
-    });
+    return cuts;
   }
 
   /* ------------------------------------------------------------------ *
@@ -370,8 +643,8 @@
     return 'text';
   }
 
-  function isTextFormat(format) {
-    return TEXT_FORMATS.indexOf(format) !== -1;
+  function isSupportedFormat(format) {
+    return SUPPORTED_FORMATS.indexOf(format) !== -1;
   }
 
   /* ------------------------------------------------------------------ *
@@ -392,10 +665,14 @@
         if (!plain) throw new Error('No lyrics found on that page.');
 
         var titleEl = doc.querySelector('#song-title, #song-title-xs');
+        // No scripts run on a parsed document, so its chords are still in the
+        // key the page was printed in -- `#fromkeysig`, not `#keysig`.
+        var keyEl = doc.querySelector('#fromkeysig') || doc.querySelector('#keysig');
         var data = {
           text: plain,
           textplus: parseStanzas(doc, true) || plain,
-          title: titleEl ? titleEl.textContent.trim() : ''
+          title: titleEl ? titleEl.textContent.trim() : '',
+          key: keyEl ? keyRoot(keyEl.textContent) : ''
         };
         pageCache.set(url, data);
         return data;
@@ -404,10 +681,6 @@
 
   /* ------------------------------------------------------------------ *
    * Preferences
-   *
-   * The language is remembered by hymnal ("ch" plus the Simplified flag)
-   * rather than by its display name, so the choice carries to the next hymn
-   * even when that hymn labels the option differently.
    * ------------------------------------------------------------------ */
 
   function readPrefs() {
@@ -444,7 +717,41 @@
     return node;
   }
 
-  function renderStanza(stanza, lines) {
+  /**
+   * One line of chorded lyrics: each chord stacked over the words it covers.
+   *
+   * A chord that actually exists is given the site's own `chord` class as well.
+   * The site transposes with `$(".chord").each(...)` across the whole document,
+   * so tagging them this way lets its key up/down buttons retune everything
+   * this extension draws, in both columns, with no extra wiring. Empty
+   * placeholders are left untagged so they are not fed to its parser.
+   */
+  function renderChordLine(segments) {
+    var line = el('div', 'hn-cline');
+    var group = null;
+
+    for (var i = 0; i < segments.length; i++) {
+      if (!group) {
+        group = el('div', 'hn-grp');
+        line.appendChild(group);
+      }
+
+      var cell = el('div', 'hn-seg');
+      var name = segments[i].chord || '';
+      cell.appendChild(el('span', name ? 'chord hn-chord' : 'hn-chord', name));
+      cell.appendChild(el('span', 'hn-word', segments[i].text));
+      group.appendChild(cell);
+
+      // A chord can land inside a word ("a|lone", "Je|sus"), which splits it
+      // into two segments. The line may only wrap where a segment ended on
+      // whitespace, so a word is never broken across two lines.
+      if (/\s$/.test(segments[i].text)) group = null;
+    }
+
+    return line;
+  }
+
+  function renderStanza(stanza, lines, chordLines) {
     var cell = el('div', 'hn-cell');
     if (!stanza) {
       cell.classList.add('hn-cell-empty');
@@ -458,11 +765,78 @@
     cell.appendChild(marker);
 
     var body = el('div', 'hn-text' + (stanza.type === 'chorus' ? ' hn-chorus' : ''));
-    for (var i = 0; i < lines.length; i++) {
-      body.appendChild(el('div', 'hn-line', lines[i] || ' '));
+    var i;
+    if (chordLines) {
+      for (i = 0; i < chordLines.length; i++) body.appendChild(renderChordLine(chordLines[i]));
+    } else {
+      for (i = 0; i < lines.length; i++) body.appendChild(el('div', 'hn-line', lines[i] || ' '));
     }
     cell.appendChild(body);
     return cell;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Repeating chords on the site's own lyrics
+   *
+   * Hymnal.net prints chords over the first verse and the first chorus only;
+   * every later stanza repeats the bare words. This rewrites those stanzas in
+   * place so the chords carry through the whole hymn, and keeps the originals
+   * so the page can be put back exactly as it was.
+   * ------------------------------------------------------------------ */
+
+  var stashed = new WeakMap();
+
+  function siteStanzas() {
+    var article = document.querySelector('.hymn-content .lyrics article.js-stanzas');
+    return article ? article.querySelectorAll('.verse') : [];
+  }
+
+  function repeatChordsOnPage(enable) {
+    var verses = siteStanzas();
+    var templates = {};
+    var i, container, type;
+
+    // Templates come only from stanzas the site itself chorded, never from one
+    // this function wrote earlier.
+    for (i = 0; i < verses.length; i++) {
+      container = verses[i].querySelector('.chord-container');
+      if (!container || container.classList.contains('hn-injected')) continue;
+      type = verses[i].getAttribute('data-type') || 'verse';
+      if (templates[type]) continue;
+      var parsed = extractChordLines(container);
+      if (parsed) templates[type] = parsed;
+    }
+
+    for (i = 0; i < verses.length; i++) {
+      container = verses[i].querySelector('.chord-container');
+      if (!container) continue;
+      type = verses[i].getAttribute('data-type') || 'verse';
+
+      if (container.classList.contains('hn-injected')) {
+        if (enable) continue; // already done
+        var original = stashed.get(container);
+        container.textContent = '';
+        if (original) container.appendChild(original.cloneNode(true));
+        container.classList.remove('hn-injected');
+        continue;
+      }
+
+      if (!enable) continue;
+      if (container.querySelector('.chord')) continue; // the site chorded this one
+      if (!templates[type]) continue;
+
+      var textEl = verses[i].querySelector('.text-container');
+      var lines = textEl ? extractLines(textEl) : null;
+      if (!lines || !lines.length) continue;
+
+      var keep = document.createDocumentFragment();
+      while (container.firstChild) keep.appendChild(container.firstChild);
+      stashed.set(container, keep);
+
+      var built = buildChordLines(lines, templates[type]);
+      for (var k = 0; k < built.length; k++) container.appendChild(renderChordLine(built[k]));
+      container.classList.add('hn-injected');
+    }
   }
 
   function build() {
@@ -485,10 +859,23 @@
     button.setAttribute('aria-pressed', 'false');
     group.appendChild(button);
 
+    // "Repeat chords" lives out here beside the format buttons rather than
+    // inside the panel, because it applies to the site's own single-column
+    // chord sheet just as much as to the two-column view.
+    var repeatWrap = el('label', 'hn-toggle hn-page-toggle hn-hidden');
+    var repeatBox = document.createElement('input');
+    repeatBox.type = 'checkbox';
+    repeatBox.className = 'hn-repeat-box';
+    repeatWrap.appendChild(repeatBox);
+    repeatWrap.appendChild(el('span', null, 'Repeat chords'));
+    repeatWrap.title = 'Carry the first stanza’s chords onto the later stanzas, matched syllable by syllable.';
+
     if (formatRow && formatRow.parentNode) {
       formatRow.parentNode.appendChild(group);
+      formatRow.parentNode.appendChild(repeatWrap);
     } else {
       hymnContent.parentNode.insertBefore(group, hymnContent);
+      hymnContent.parentNode.insertBefore(repeatWrap, hymnContent);
     }
 
     /* -------- the side-by-side panel -------- *
@@ -501,6 +888,19 @@
     var leftHead = el('div', 'hn-head hn-head-left');
     leftHead.appendChild(el('span', 'hn-head-label', here.label));
 
+    // The transpose control sits inside .hymn-content, which is hidden while
+    // the panel is open, so it is borrowed into the panel heading and returned
+    // on close. Moving the element keeps the site's own click handlers on it,
+    // and because every chord rendered here carries the site's `chord` class,
+    // its retune reaches both columns at once.
+    var keySig = document.querySelector('.hymn-content .key-sig');
+    var keySigHome = null;
+    if (keySig && keySig.parentNode) {
+      keySigHome = document.createComment('hn-keysig');
+      keySig.parentNode.insertBefore(keySigHome, keySig);
+      leftHead.appendChild(el('span', 'hn-keysig-slot'));
+    }
+
     var rightHead = el('div', 'hn-head hn-head-right');
     var select = el('select', 'hn-select');
     select.setAttribute('aria-label', 'Translation language');
@@ -511,12 +911,12 @@
     }
     rightHead.appendChild(select);
 
-    var smartWrap = el('label', 'hn-smart hn-hidden');
+    var smartWrap = el('label', 'hn-toggle hn-hidden');
     var smartBox = document.createElement('input');
     smartBox.type = 'checkbox';
     smartBox.className = 'hn-smart-box';
     smartWrap.appendChild(smartBox);
-    smartWrap.appendChild(el('span', 'hn-smart-text', 'Smart align'));
+    smartWrap.appendChild(el('span', null, 'Smart align'));
     smartWrap.title = 'Merge short Chinese lines so they line up with the longer lines opposite.';
     rightHead.appendChild(smartWrap);
 
@@ -528,6 +928,7 @@
     grid.appendChild(status);
     grid.appendChild(body);
     panel.appendChild(grid);
+    panel.appendChild(buildFeedback());
 
     hymnContent.parentNode.insertBefore(panel, hymnContent.nextSibling);
 
@@ -548,18 +949,37 @@
       return null;
     }
 
-    function refreshSmartToggle() {
-      smartWrap.classList.toggle('hn-hidden', chineseSide() === null);
+    function mode() {
+      var format = currentFormat();
+      return isSupportedFormat(format) ? format : 'text';
     }
 
-    function mode() {
-      return currentFormat() === 'textplus' ? 'textplus' : 'text';
+    function refreshToggles() {
+      var chords = currentFormat() === 'chords';
+      smartWrap.classList.toggle('hn-hidden', chineseSide() === null);
+      repeatWrap.classList.toggle('hn-hidden', !chords);
+      if (keySig && keySig.parentNode === leftHead) keySig.classList.toggle('hidden', !chords);
+    }
+
+    function borrowKeySig() {
+      if (!keySig || keySig.parentNode === leftHead) return;
+      leftHead.appendChild(keySig);
+    }
+
+    function returnKeySig() {
+      if (!keySig || !keySigHome || keySig.parentNode !== leftHead) return;
+      keySigHome.parentNode.insertBefore(keySig, keySigHome);
+      keySig.classList.toggle('hidden', currentFormat() !== 'chords');
+    }
+
+    function stanzaSet() {
+      return mode() === 'textplus' ? 'textplus' : 'text';
     }
 
     function originalStanzas() {
-      var m = mode();
-      if (!originalByMode[m]) originalByMode[m] = parseStanzas(document, m === 'textplus');
-      return originalByMode[m];
+      var set = stanzaSet();
+      if (!originalByMode[set]) originalByMode[set] = parseStanzas(document, set === 'textplus');
+      return originalByMode[set];
     }
 
     function setStatus(message, isError) {
@@ -568,28 +988,100 @@
       status.classList.toggle('hn-hidden', !message);
     }
 
+    /** The stanza whose chords the rest of that kind borrow. */
+    function chordTemplate(stanzas, type) {
+      for (var s = 0; s < stanzas.length; s++) {
+        if (stanzas[s].type === type && stanzas[s].chordLines) return stanzas[s];
+      }
+      return null;
+    }
+
+    /**
+     * Chord lines for a stanza: its own if the page supplies them, otherwise
+     * the template's chords re-hung over its words -- but only when "Repeat
+     * chords" is on, since by default the site simply prints the bare words.
+     */
+    function chordLinesFor(stanza, template) {
+      if (stanza.chordLines) return stanza.chordLines;
+      if (!repeatBox.checked || !template || !template.chordLines) return null;
+
+      return buildChordLines(stanza.lines, template.chordLines);
+    }
+
+    /** Apply a smart-align grouping to plain lines and to chord lines alike. */
+    function applyCuts(cuts, lines, chordLines) {
+      var merged = cuts.map(function (cut) {
+        return lines.slice(cut[0], cut[1]).join('');
+      });
+      var mergedChords = null;
+      if (chordLines && chordLines.length === lines.length) {
+        mergedChords = cuts.map(function (cut) {
+          var segments = [];
+          for (var i = cut[0]; i < cut[1]; i++) segments = segments.concat(chordLines[i]);
+          return segments;
+        });
+      }
+      return { lines: merged, chordLines: mergedChords || chordLines };
+    }
+
     function render(translation) {
       body.textContent = '';
 
-      var rows = alignStanzas(originalStanzas(), translation[mode()]);
+      var chordsMode = mode() === 'chords';
+      var leftStanzas = originalStanzas();
+      var rightStanzas = translation[stanzaSet()];
+      var rows = alignStanzas(leftStanzas, rightStanzas);
       var side = smartBox.checked ? chineseSide() : null;
+
+      // The left column is parsed from the live page, so it is already in
+      // whatever key the reader has transposed to. The right column came from
+      // a separately fetched page and has to be shifted to match.
+      var liveKey = document.querySelector('#keysig');
+      var nowKey = liveKey ? keyRoot(liveKey.textContent) : '';
+      var fromKey = translation.key || '';
+      var shift = 0;
+      var useFlats = FLAT_KEYS.indexOf(nowKey) !== -1;
+      if (chordsMode && nowKey && fromKey) {
+        var a = noteIndex(nowKey);
+        var b = noteIndex(fromKey);
+        if (a >= 0 && b >= 0) shift = (a - b + 12) % 12;
+      }
+
+      var templates = {
+        left: { verse: chordTemplate(leftStanzas, 'verse'), chorus: chordTemplate(leftStanzas, 'chorus') },
+        right: { verse: chordTemplate(rightStanzas, 'verse'), chorus: chordTemplate(rightStanzas, 'chorus') }
+      };
 
       for (var r = 0; r < rows.length; r++) {
         var left = rows[r][0];
         var right = rows[r][1];
 
-        // Merging needs both sides present to know how many lines to aim for.
         var leftLines = left ? left.lines : [];
         var rightLines = right ? right.lines : [];
-        if (side === 'left' && left && right) {
-          leftLines = smartMerge(left.lines, right.lines);
-        } else if (side === 'right' && left && right) {
-          rightLines = smartMerge(right.lines, left.lines);
+        var leftChords = chordsMode && left ? chordLinesFor(left, templates.left[left.type]) : null;
+        var rightChords = chordsMode && right ? chordLinesFor(right, templates.right[right.type]) : null;
+        if (rightChords && shift) rightChords = transposeLines(rightChords, shift, useFlats);
+
+        // Merging needs both sides present to know how many lines to aim for.
+        if (side && left && right) {
+          var from = side === 'left' ? left : right;
+          var against = side === 'left' ? right : left;
+          var cuts = smartCuts(from.lines, against.lines);
+          if (cuts) {
+            var applied = applyCuts(cuts, from.lines, side === 'left' ? leftChords : rightChords);
+            if (side === 'left') {
+              leftLines = applied.lines;
+              leftChords = applied.chordLines;
+            } else {
+              rightLines = applied.lines;
+              rightChords = applied.chordLines;
+            }
+          }
         }
 
         var row = el('div', 'hn-row');
-        row.appendChild(renderStanza(left, leftLines));
-        row.appendChild(renderStanza(right, rightLines));
+        row.appendChild(renderStanza(left, leftLines, leftChords));
+        row.appendChild(renderStanza(right, rightLines, rightChords));
         body.appendChild(row);
       }
     }
@@ -622,6 +1114,8 @@
       button.setAttribute('aria-pressed', 'true');
       hymnContent.classList.add('hn-hidden');
       panel.classList.remove('hn-hidden');
+      borrowKeySig();
+      refreshToggles();
       show();
     }
 
@@ -630,19 +1124,21 @@
       requestToken++;
       button.classList.remove('hn-on');
       button.setAttribute('aria-pressed', 'false');
+      returnKeySig();
       hymnContent.classList.remove('hn-hidden');
       panel.classList.add('hn-hidden');
     }
 
     /**
-     * Keep in step with the site's format buttons. Text and Text+ both have a
-     * two-column equivalent, so the panel stays open and re-renders; the sheet
-     * music modes do not, so it closes and the button greys out.
+     * Keep in step with the site's format buttons. Text, Text+ and Chords all
+     * have a two-column equivalent, so the panel stays open and re-renders;
+     * Piano and Guitar are leadsheet images, so it closes and the button greys.
      */
     function syncFormat() {
-      var allowed = isTextFormat(currentFormat());
+      var allowed = isSupportedFormat(currentFormat());
       button.disabled = !allowed;
-      button.title = allowed ? '' : 'Multilingual view is available in Text and Text+ mode.';
+      button.title = allowed ? '' : 'Multilingual view is available in Text, Text+ and Chords mode.';
+      refreshToggles();
       if (!allowed) {
         if (isOpen) close();
       } else if (isOpen) {
@@ -657,7 +1153,7 @@
     });
 
     select.addEventListener('change', function () {
-      refreshSmartToggle();
+      refreshToggles();
       savePrefs();
       if (isOpen) show();
     });
@@ -666,6 +1162,22 @@
       savePrefs();
       if (isOpen) show();
     });
+
+    repeatBox.addEventListener('change', function () {
+      savePrefs();
+      repeatChordsOnPage(repeatBox.checked);
+      if (isOpen) show();
+    });
+
+    // Transposing rewrites every `.chord` in the document, including the ones
+    // rendered here, so the view needs no redraw -- but the parsed copy held in
+    // memory is now a key behind, so it is dropped.
+    var keyButtons = document.querySelectorAll('.keysig-up, .keysig-down');
+    for (var t = 0; t < keyButtons.length; t++) {
+      keyButtons[t].addEventListener('click', function () {
+        originalByMode = {};
+      });
+    }
 
     // The site's own handler runs first and sets `.active`, so by the time this
     // fires `currentFormat()` already reports the newly chosen mode.
@@ -680,13 +1192,15 @@
         collection: choice ? choice.collection : '',
         gb: choice ? choice.gb : false,
         label: choice ? choice.label : '',
-        smartAlign: smartBox.checked
+        smartAlign: smartBox.checked,
+        repeatChords: repeatBox.checked
       });
     }
 
-    // Restore the language and smart-align setting chosen on a previous hymn.
+    // Restore the language and toggles chosen on a previous hymn.
     readPrefs().then(function (prefs) {
       if (prefs && prefs.smartAlign) smartBox.checked = true;
+      if (prefs && prefs.repeatChords) repeatBox.checked = true;
 
       var match = null;
       if (prefs && prefs.collection) {
@@ -699,12 +1213,122 @@
       }
       if (match) select.value = match.url;
 
-      refreshSmartToggle();
+      refreshToggles();
+      if (repeatBox.checked) repeatChordsOnPage(true);
       if (isOpen) show();
     });
 
-    refreshSmartToggle();
     syncFormat();
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Feedback
+   *
+   * The message is posted by the background service worker rather than from
+   * here, so the request is not subject to hymnal.net's page CSP and the form
+   * endpoint is never exposed to the page.
+   * ------------------------------------------------------------------ */
+
+  function buildFeedback() {
+    var foot = el('div', 'hn-foot');
+
+    var toggle = el('button', 'hn-fb-toggle', 'Send feedback');
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', 'false');
+    foot.appendChild(toggle);
+
+    var form = el('form', 'hn-fb-form hn-hidden');
+
+    var message = el('textarea', 'hn-fb-message');
+    message.rows = 4;
+    message.maxLength = 2000;
+    message.required = true;
+    message.placeholder = 'What would make this better? Bugs, wording, a hymn that lines up oddly…';
+    message.setAttribute('aria-label', 'Your feedback');
+    form.appendChild(message);
+
+    var email = el('input', 'hn-fb-email');
+    email.type = 'email';
+    email.maxLength = 200;
+    email.placeholder = 'Your email (optional, only if you would like a reply)';
+    email.setAttribute('aria-label', 'Your email, optional');
+    form.appendChild(email);
+
+    // Honeypot: hidden from people, filled in by most bots. Formspree discards
+    // any submission where `_gotcha` has a value.
+    var gotcha = el('input', 'hn-fb-gotcha');
+    gotcha.type = 'text';
+    gotcha.tabIndex = -1;
+    gotcha.autocomplete = 'off';
+    gotcha.setAttribute('aria-hidden', 'true');
+    form.appendChild(gotcha);
+
+    var actions = el('div', 'hn-fb-actions');
+    var send = el('button', 'btn btn-default hn-fb-send', 'Send');
+    send.type = 'submit';
+    actions.appendChild(send);
+    var result = el('span', 'hn-fb-result');
+    actions.appendChild(result);
+    form.appendChild(actions);
+
+    form.appendChild(el('p', 'hn-fb-note',
+      'Sends your message, this hymn’s address and the extension version. Nothing else, and nothing is stored in your browser.'));
+
+    foot.appendChild(form);
+
+    toggle.addEventListener('click', function () {
+      var opening = form.classList.contains('hn-hidden');
+      form.classList.toggle('hn-hidden', !opening);
+      toggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      if (opening) message.focus();
+    });
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var text = message.value.trim();
+      if (!text) {
+        result.textContent = 'Please write a message first.';
+        result.className = 'hn-fb-result hn-error';
+        return;
+      }
+
+      send.disabled = true;
+      result.textContent = 'Sending…';
+      result.className = 'hn-fb-result';
+
+      var payload = {
+        message: text,
+        email: email.value.trim(),
+        _gotcha: gotcha.value,
+        page: location.href
+      };
+
+      var done = function (response) {
+        send.disabled = false;
+        if (response && response.ok) {
+          form.classList.add('hn-hidden');
+          toggle.textContent = 'Thanks — feedback sent';
+          toggle.disabled = true;
+          message.value = '';
+        } else {
+          result.textContent = (response && response.error) || 'Could not send. Please try again later.';
+          result.className = 'hn-fb-result hn-error';
+        }
+      };
+
+      try {
+        chrome.runtime.sendMessage({ type: 'hymnal-feedback', payload: payload }, function (response) {
+          if (chrome.runtime.lastError) {
+            return done({ ok: false, error: 'Could not reach the extension. Try reloading the page.' });
+          }
+          done(response);
+        });
+      } catch (e) {
+        done({ ok: false, error: 'Could not reach the extension. Try reloading the page.' });
+      }
+    });
+
+    return foot;
   }
 
   build();
