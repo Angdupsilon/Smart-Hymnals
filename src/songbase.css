@@ -1,0 +1,64 @@
+/*
+ * Smart Hymnals -- the "Repeat chords" toggle on songbase.life.
+ *
+ * Songbase's own controls are a quiet grey row above the lyrics, so this joins
+ * them rather than announcing itself: the site's `--comment-color` for the
+ * label and `--ui-color` for the box, both of which the night theme redefines
+ * on `body.css-night`, so the toggle follows the theme without knowing about
+ * it. Every selector is prefixed `sh-`.
+ */
+
+/* `.song-controls` is a two-column grid, `3fr 1fr`, with the transpose control
+ * pinned to the narrow right-hand cell. The toggle takes the wide left cell on
+ * the same row and hugs the middle, so the two read as one row of controls
+ * instead of the toggle drifting off to the far left.
+ *
+ * `position: relative` is not decoration. A song with more than one tune gets a
+ * `.tune-selector`, which the site also places at column 1 row 1 and which is
+ * itself `position: relative` -- so it painted over a static toggle sharing the
+ * cell and swallowed every click, opening the tune menu instead of ticking the
+ * box. `.sh-own-row` below moves the toggle out of that cell altogether; this
+ * keeps it clickable even if the site one day puts something else there. */
+.lyrics .song-controls > .sh-repeat {
+  grid-column-start: 1;
+  grid-row-start: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 6px;
+  margin-right: 16px;
+  font-size: 90%;
+  font-weight: normal;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  color: var(--comment-color, #aaa);
+  position: relative;
+  z-index: 1;
+}
+
+/* Added whenever the site has a control of its own in that first cell. The
+ * toggle takes a row to itself underneath, still right-aligned, so the two
+ * never overlap however wide the site's control grows. */
+.lyrics .song-controls > .sh-repeat.sh-own-row {
+  grid-column: 1 / -1;
+  grid-row-start: 2;
+  margin-right: 0;
+  margin-top: 6px;
+}
+
+.lyrics .song-controls > .sh-repeat input {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--chord, #1f45ff);
+}
+
+/* On a phone the controls row is already tight, so the label sits to the left
+ * of the transpose buttons rather than squeezing them. A toggle that has been
+ * given a row of its own stays right-aligned there, where there is room. */
+@media (max-width: 600px) {
+  .lyrics .song-controls > .sh-repeat:not(.sh-own-row) {
+    justify-self: start;
+    margin-right: 0;
+  }
+}

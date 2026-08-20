@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Smart Hymnals",
-  "version": "1.2.1",
-  "description": "Smart tools for Hymnal.net hymn pages: multilingual lyrics side by side, chords through every stanza, and Chinese-English alignment.",
+  "version": "1.3.0",
+  "description": "Smart tools for hymn pages: multilingual lyrics side by side, chords through every stanza, and Chinese-English alignment.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -20,8 +20,17 @@
         "https://www.hymnal.net/*/hymn/*",
         "https://hymnal.net/*/hymn/*"
       ],
-      "js": ["src/content.js"],
+      "js": ["src/chords.js", "src/content.js"],
       "css": ["src/content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://songbase.life/*",
+        "https://www.songbase.life/*"
+      ],
+      "js": ["src/chords.js", "src/songbase.js"],
+      "css": ["src/songbase.css"],
       "run_at": "document_idle"
     }
   ]

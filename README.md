@@ -14,6 +14,11 @@ A Chrome extension that adds smart tools to hymn pages on
 - **Transposing** — the site's key control keeps working, retuning both columns
   and any repeated stanzas at once.
 
+and one to song pages on [songbase.life](https://songbase.life):
+
+- **Repeat chords** — the same idea over Songbase's own markup, as a toggle
+  beside its transpose control. See [Songbase](#songbase) below.
+
 ## Installing
 
 Chrome does not allow installing an unpacked extension from a `.zip`, so load
@@ -22,7 +27,8 @@ the folder directly:
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked** and select this folder.
-4. Open any hymn page, e.g. <https://www.hymnal.net/en/hymn/h/787>.
+4. Open any hymn page, e.g. <https://www.hymnal.net/en/hymn/h/787>, or any
+   Songbase song, e.g. <https://songbase.life/songs/1>.
 
 The **Multilingual** button appears next to Text / Text+ / Chords / Piano /
 Guitar. It is only added when the hymn actually has a translation to show.
@@ -202,11 +208,96 @@ shape the site would.
 - The pressed state uses its own `hn-on` class instead of Bootstrap's `active`,
   because the site ships `.btn-default.active { background: … !important }` —
   which in light mode paints the button plain white and makes "on" invisible.
+- The site's navbar search is `hidden-xs hidden-sm col-md-3`, so between 768 and
+  991px wide Hymnal.net hides it and leaves it reachable only inside the *More*
+  dropdown. That band is still the desktop layout — a half-width window, or a
+  tablet held sideways — and search is the main way to reach another hymn, so
+  the extension puts it back. It cannot go beside the menu there (the container
+  is 750px and the menu already runs to about 660), so it takes a full-width row
+  of its own under the links; the navbar is two rows tall in that band as a
+  result. This is the site's own behaviour, not something the extension caused —
+  it is fixed here because losing the search bar on a desktop screen is worse
+  than a taller navbar.
 - Colours come from the CSS custom properties Hymnal.net defines on
   `<html data-theme="light|dark">` (`--hymn-main-color`, `--verse-num-background`,
   and so on), so the panel follows the site's own theme toggle. Every var has a
   light-mode fallback in case one is renamed.
 - All injected classes are namespaced `hn-`.
+
+## Songbase
+
+[songbase.life](https://songbase.life) has the same gap: the chords are printed
+over the first stanza and the first chorus, and every later stanza repeats the
+bare words. A **Repeat chords** checkbox appears beside its transpose control
+and carries them through, verses taking a verse's chords and choruses a
+chorus's.
+
+The syllable matching is the identical problem, so it is the identical code —
+[`src/chords.js`](src/chords.js) is shared by both content scripts. What differs
+is the markup at each end, and Songbase's is quite unlike Hymnal.net's. A chord
+is an empty span sitting *inside* the word, at the character it hangs over:
+
+```html
+<div class="line">What a <span class="chord-word">w<span class="chord"
+   data-uncopyable-text="G"></span>onderful</span> change in my life ...</div>
+```
+
+The label is drawn by CSS — `[data-uncopyable-text]::after { content: attr(…) }`
+out of an absolutely positioned box — which is why the span is empty and why a
+chord does not disturb the words underneath it. Repeating chords therefore means
+writing exactly that shape back out, so the site's own stylesheet lays the result
+out and nothing here has to know how a chord is drawn. Chords are hung one word
+to a `.chord-word`, as the site does, because that element is `inline-block`:
+wrapping a run of words in a single one would stop a long line breaking anywhere
+inside it.
+
+Three things follow from Songbase being a React app rather than a server-rendered
+page:
+
+- **Every render wipes everything injected.** Pressing transpose replaces the
+  whole of `.lyrics` from source — one `childList` mutation, every node out and
+  back in — taking the checkbox with it. So the script re-adds the toggle and
+  re-applies the chords after each render, watched for with a `MutationObserver`.
+- **That makes transposing free.** By the time the observer fires, the site has
+  already retuned the first stanza, so re-reading it copies the new chords
+  across. There is no key arithmetic on this side at all.
+- **Navigation is the same event.** Songbase never reloads the page, so opening
+  another song is just another render, and the observer picks it up. The chosen
+  setting carries from song to song, and from Hymnal.net, since both scripts keep
+  it under the same key.
+
+Switching the toggle off restores the site's own nodes: the original children of
+every rewritten line are kept in a `WeakMap` and put back, rather than
+re-deriving them.
+
+### Where the toggle sits
+
+`.song-controls` is a two-column grid, `3fr 1fr`, with the transpose control
+pinned to the narrow right-hand cell. The toggle takes the wide left one, so the
+two read as a single row.
+
+That cell is not always free. A song with more than one tune — hymn 1608, say —
+gets a `.tune-selector` there, and it is `position: relative` where a plain label
+is `static`, so it painted over the toggle and **took every click**: the box could
+not be ticked at all, the tune menu opened instead. Overlapping controls are
+invisible in a screenshot; `document.elementFromPoint` over the label returned
+`DIV.tune-selector`, which is what named it.
+
+The toggle now takes a row of its own whenever anything else occupies that cell.
+The test is deliberately not "is there a `.tune-selector`" but "does any child
+other than the transpose control actually take a grid cell" — the bookmark, share
+and music buttons are `position: absolute` and take none, so they do not count,
+and a control the site adds later will be handled without a code change. The
+label also carries `position: relative` so it wins the paint order regardless.
+
+The checkbox only appears where it has something to do — a song with no chords
+at all, or one the site has chorded throughout, does not get one.
+
+Songbase's Chinese lyrics are left character for character. Hymnal.net sets its
+own Chinese chord lines with a gap after each character and the extension has to
+match it to sit beside them, but Songbase rewrites its lines in place, where
+adding spaces would be editing the lyrics; hence the `spaceChinese` opt-out in
+the shared code.
 
 ## Feedback
 
@@ -276,8 +367,11 @@ message you type and send yourself.
 
 ```
 manifest.json          MV3 manifest
-src/content.js         language discovery, fetching, alignment, chords, rendering
-src/content.css        panel and button styles, themed from the site's variables
+src/chords.js          syllables and chord transfer; shared by both sites
+src/content.js         hymnal.net: language discovery, fetching, alignment, rendering
+src/content.css        hymnal.net: panel and button styles, themed from its variables
+src/songbase.js        songbase.life: repeat chords, re-applied on every React render
+src/songbase.css       songbase.life: the toggle, themed from its variables
 src/background.js      service worker; relays feedback, rate limits it
 icons/                 generated PNGs (16/32/48/128)
 tools/make_icons.py    regenerates icons/ (standard library only)
@@ -300,7 +394,11 @@ tools/make_icons.py    regenerates icons/ (standard library only)
   (`e-nab-le` rather than `e-na-ble`). Chinese is exact.
 - Repeat chords assumes stanzas of a hymn share a metre, which is what makes one
   tune fit them all. A hymn with an irregular stanza will place those chords
-  loosely.
+  loosely. Where a later stanza has fewer lines than the one the chords come
+  from, the extra lines are simply left bare.
+- On Songbase, only the toggle's own state is added to the page; the site keeps
+  no per-song setting, so a song opened fresh is chorded straight away rather
+  than remembering that this particular song was left alone.
 
 ## Publishing to the Chrome Web Store
 

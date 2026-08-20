@@ -124,6 +124,32 @@
   }
 }
 
+/* ---------- keeping the site's search reachable ----------
+ * Hymnal.net's navbar search is `hidden-xs hidden-sm col-md-3`, so between 768
+ * and 991px the site hides it and leaves it reachable only by opening the More
+ * dropdown. That band is still the desktop layout -- a half-width window on a
+ * laptop, or a tablet in landscape -- and the search is the site's main way of
+ * getting to another hymn, so it is put back.
+ *
+ * It cannot be floated beside the menu: the container is 750px there and the
+ * menu already runs to about 660px, so the box goes full width on its own line
+ * under the links. That makes the navbar two rows tall in this band, which is
+ * the layout cost of never losing the search.
+ *
+ * Matched through the form it contains rather than by the site's utility
+ * classes, so it keeps working if `hidden-sm` is ever swapped for something
+ * else. `display` needs !important to outrank Bootstrap's own
+ * `.hidden-sm { display: none !important }`. */
+@media (min-width: 768px) and (max-width: 991px) {
+  .navbar .navbar-collapse > div:has(> form.search-form) {
+    display: block !important;
+    float: none;
+    clear: both;
+    width: 100%;
+    padding: 0 15px 10px;
+  }
+}
+
 /* ---------- the side-by-side panel ---------- */
 
 .hn-multi-panel {
