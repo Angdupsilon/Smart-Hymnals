@@ -871,6 +871,11 @@
     /* -------- behaviour -------- */
 
     var isOpen = false;
+    // What the reader last asked for, which is not the same as `isOpen`: the
+    // panel also closes on its own in Piano and Guitar mode. Only a click on
+    // the button moves this, so it is what carries over to the next hymn.
+    var wantOpen = false;
+    var userToggled = false;
     var requestToken = 0;
     var originalByMode = {};
 
@@ -1084,9 +1089,11 @@
       button.title = allowed ? '' : 'Multilingual view is available in Text, Text+ and Chords mode.';
       refreshToggles();
       if (!allowed) {
-        if (isOpen) close();
+        if (isOpen) close(); // leaves `wantOpen` alone: the reader did not ask for this
       } else if (isOpen) {
         show();
+      } else if (wantOpen) {
+        open();
       }
     }
 
@@ -1094,6 +1101,11 @@
       event.preventDefault();
       if (button.disabled) return;
       if (isOpen) close(); else open();
+      // Taken from `isOpen` rather than assumed, so a page with no lyrics --
+      // where open() bails out -- is not remembered as open.
+      userToggled = true;
+      wantOpen = isOpen;
+      savePrefs();
     });
 
     select.addEventListener('change', function () {
@@ -1137,14 +1149,17 @@
         gb: choice ? choice.gb : false,
         label: choice ? choice.label : '',
         smartAlign: smartBox.checked,
-        repeatChords: repeatBox.checked
+        repeatChords: repeatBox.checked,
+        multilingual: wantOpen
       });
     }
 
-    // Restore the language and toggles chosen on a previous hymn.
+    // Restore the view, language and toggles chosen on a previous hymn.
     readPrefs().then(function (prefs) {
       if (prefs && prefs.smartAlign) smartBox.checked = true;
       if (prefs && prefs.repeatChords) repeatBox.checked = true;
+      // Unless the reader beat the read to it, in which case their click wins.
+      if (prefs && prefs.multilingual && !userToggled) wantOpen = true;
 
       var match = null;
       if (prefs && prefs.collection) {
@@ -1160,6 +1175,9 @@
       refreshToggles();
       if (repeatBox.checked) repeatChordsOnPage(true);
       if (isOpen) show();
+      // Reopens the panel here if it was left open, but only where the current
+      // format supports it.
+      else if (wantOpen) syncFormat();
     });
 
     syncFormat();
