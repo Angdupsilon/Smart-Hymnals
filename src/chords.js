@@ -180,22 +180,131 @@
     return segments;
   }
 
+  function lineText(segments) {
+    return segments.map(function (s) { return s.text; }).join('');
+  }
+
+  /**
+   * How many lines to gather before giving up on finding a group that balances.
+   * A stanza is only ever broken a line or two differently, and a wide window
+   * would start merging lines that differ for a reason.
+   */
+  var MAX_SPAN = 4;
+
+  /**
+   * How many of the lines starting at `start` have to be taken together before
+   * the template and the target carry the same number of syllables. Usually
+   * one -- the answer is only larger where the two stanzas were broken into
+   * lines differently.
+   */
+  function balancingSpan(targets, templateLines, start) {
+    var source = 0;
+    var target = 0;
+
+    for (var n = 1; n <= MAX_SPAN && start + n <= targets.length; n++) {
+      var k = start + n - 1;
+      if (!templateLines[k]) break;
+      source += syllableStarts(lineText(templateLines[k])).length;
+      target += syllableStarts(targets[k]).length;
+      if (source === target) return n;
+    }
+    return 1;
+  }
+
+  /**
+   * Cut a group's segments back into one list per line, dropping the spaces
+   * that joined the lines together. A chord landing on a boundary belongs to
+   * the line it opens.
+   */
+  function cutIntoLines(segments, texts) {
+    var ranges = [];
+    var at = 0;
+    var i;
+
+    for (i = 0; i < texts.length; i++) {
+      ranges.push([at, at + texts[i].length]);
+      at += texts[i].length + 1;   // + the space that joined this line to the next
+    }
+
+    var out = texts.map(function () { return []; });
+    var offset = 0;
+
+    for (i = 0; i < segments.length; i++) {
+      var text = segments[i].text;
+      var chord = segments[i].chord;
+      var start = offset;
+      offset += text.length;
+
+      for (var k = 0; k < ranges.length; k++) {
+        var from = Math.max(start, ranges[k][0]);
+        var to = Math.min(offset, ranges[k][1]);
+        if (to < from) continue;
+        // An empty slice is worth keeping only when it carries the chord struck
+        // past the last syllable of the line.
+        if (to === from && !chord) continue;
+        out[k].push({ chord: chord, text: text.slice(from - start, to - start) });
+        chord = '';
+      }
+    }
+
+    return out;
+  }
+
   /**
    * Hang a template stanza's chords over a set of plain lines, one output line
    * per input line. A line the template has no chords for is still spaced out
    * when it is Chinese, so the whole stanza is set the same way.
+   *
+   * The site breaks a stanza into printed lines to fit the page, and it does
+   * not always break two stanzas of the same hymn in the same place -- one may
+   * run seven syllables and then four where another runs five and then six.
+   * The tune does not care; it runs straight through the break. So the lines
+   * are matched in groups: consecutive lines are gathered until the template
+   * and the target come to the same number of syllables, the chords are hung
+   * over the group as one stretch, and the result is cut back into lines
+   * afterwards. Where a line balances on its own, which is the usual case, the
+   * group is that one line and nothing about it changes.
    */
   function buildChordLines(lines, templateLines, options) {
     var space = !options || options.spaceChinese !== false;
+
+    // Chinese is spaced out here rather than inside transferChords, so that the
+    // offsets a group is cut back on are offsets into the text finally shown.
+    var targets = lines.map(function (line) {
+      return space && CJK.test(line) ? spaceCJK(line) : line;
+    });
+    var inner = { spaceChinese: false };
+
     var out = [];
-    for (var i = 0; i < lines.length; i++) {
-      var source = templateLines[i];
-      var segments = source ? transferChords(source, lines[i], options) : null;
-      if (!segments) {
-        segments = [{ chord: '', text: space && CJK.test(lines[i]) ? spaceCJK(lines[i]) : lines[i] }];
+    var i = 0;
+
+    while (i < targets.length) {
+      var span = balancingSpan(targets, templateLines, i);
+      var source = [];
+      var texts = [];
+      var k;
+
+      for (k = i; k < i + span; k++) {
+        // A space between the lines of a group, so that the last word of one
+        // and the first of the next are not read as a single word.
+        if (k > i) {
+          source.push({ chord: '', text: ' ' });
+          texts.push(' ');
+        }
+        source = source.concat(templateLines[k] || []);
+        texts.push(targets[k]);
       }
-      out.push(segments);
+
+      var built = source.length ? transferChords(source, texts.join(''), inner) : null;
+      var pieces = built ? cutIntoLines(built, targets.slice(i, i + span)) : null;
+
+      for (k = 0; k < span; k++) {
+        var segments = pieces && pieces[k] && pieces[k].length ? pieces[k] : null;
+        out.push(segments || [{ chord: '', text: targets[i + k] }]);
+      }
+      i += span;
     }
+
     return out;
   }
 
