@@ -303,7 +303,10 @@
 .hn-text {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 16px;
+  /* Relative to the document, so the panel follows the reader's own font size
+   * rather than pinning the lyrics at one pixel height. The chord row is sized
+   * from this in turn, which is what keeps the two in step. */
+  font-size: 1.15em;
   line-height: 1.6;
   color: var(--hymn-main-color, #333);
 }
@@ -330,6 +333,11 @@
   align-items: flex-end;
   flex-wrap: wrap;
   line-height: 1.5;
+  /* iOS scales text up by the width of the block holding it, which would size
+   * a one-syllable segment differently from a long one and leave the chords
+   * sitting at odd heights along the line. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 /* Segments that make up a single word are held in one group so the line can
@@ -344,19 +352,23 @@
   flex-direction: column;
 }
 
+/* Sized and faded as the site sets its own chords -- `em` rather than pixels
+ * so the name tracks the lyric under it whatever the reader's font size, and
+ * the superscript quality with it. */
 .hn-chord {
-  font-size: 13px;
+  font-size: 0.8em;
   line-height: 1.25;
   min-height: 1.25em;
-  opacity: 0.65;
+  opacity: 0.75;
   font-weight: 700;
   white-space: pre;
 }
 
 /* Reserve a little room after a chord name so two chords falling on adjacent
- * syllables cannot run together ("BmD"). Empty placeholders are left alone,
- * so the lyrics keep their natural spacing. */
-.hn-chord:not(:empty) {
+ * syllables cannot run together ("BmD"). Set only where a chord actually
+ * follows, since anywhere else it would push the lyrics apart to make room for
+ * nothing. */
+.hn-chord-gap {
   padding-right: 0.5em;
 }
 

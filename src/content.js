@@ -91,22 +91,31 @@
       for (var j = 0; j < lineEls[i].childNodes.length; j++) {
         var node = lineEls[i].childNodes[j];
 
+        // A segment carrying neither a chord nor a word is nothing at all: the
+        // markup is pretty-printed, so the gaps between its blocks are newlines
+        // that clean() has just taken away.
         if (node.nodeType === Node.TEXT_NODE) {
-          if (node.nodeValue) segments.push({ chord: '', text: clean(node.nodeValue) });
+          var between = clean(node.nodeValue);
+          if (between) segments.push({ chord: '', text: between });
           continue;
         }
         if (node.nodeType !== Node.ELEMENT_NODE) continue;
 
+        var name = '';
+        var text = '';
+
         if (node.classList && node.classList.contains('chord-text')) {
           var chordEl = node.querySelector('.chord');
-          var text = '';
+          if (chordEl) name = chordName(chordEl);
           for (var k = 0; k < node.childNodes.length; k++) {
             if (node.childNodes[k] !== chordEl) text += node.childNodes[k].textContent;
           }
-          segments.push({ chord: chordEl ? chordEl.textContent.trim() : '', text: clean(text) });
+          text = clean(text);
         } else {
-          segments.push({ chord: '', text: clean(node.textContent) });
+          text = clean(node.textContent);
         }
+
+        if (name || text) segments.push({ chord: name, text: text });
       }
 
       if (segments.length) lines.push(segments);
@@ -115,8 +124,26 @@
     return lines.length ? lines : null;
   }
 
+  /**
+   * The site pretty-prints its chord markup, so a segment's text arrives
+   * wrapped in newlines and indentation that are formatting rather than lyric
+   * -- the spacing that matters is written as `&nbsp;`. Those newlines go
+   * first, before the non-breaking spaces become ordinary ones: `\s` matches a
+   * non-breaking space too, so stripping in the other order would eat the very
+   * spaces that hold a chord over its own syllable.
+   */
   function clean(text) {
-    return text.replace(/\u00a0/g, ' ');
+    return text.replace(/[ \t]*[\r\n]+[ \t]*/g, '').replace(/\u00a0/g, ' ');
+  }
+
+  /**
+   * A chord's name. The site sets the quality as a superscript -- `A<sup>7</sup>`
+   * -- so the element's text arrives with the markup's own line breaks around
+   * it; they are collapsed here, since `.hn-chord` is set `pre` and would
+   * otherwise break a name across two lines.
+   */
+  function chordName(el) {
+    return el.textContent.replace(/\s+/g, ' ').trim();
   }
 
   /**
@@ -573,26 +600,74 @@
    * this extension draws, in both columns, with no extra wiring. Empty
    * placeholders are left untagged so they are not fed to its parser.
    */
+  /**
+   * A chord name written the way chord symbols are set: the quality raised, so
+   * "G7" reads G with a superscript seven. It is what the site does with its
+   * own chords, and a stanza chorded here sits directly beneath those.
+   */
+  function chordSymbol(name) {
+    var fragment = document.createDocumentFragment();
+    var digits = /\d+/g;
+    var position = 0;
+    var match;
+
+    while ((match = digits.exec(name))) {
+      if (match.index > position) {
+        fragment.appendChild(document.createTextNode(name.slice(position, match.index)));
+      }
+      fragment.appendChild(el('sup', null, match[0]));
+      position = match.index + match[0].length;
+    }
+    if (position < name.length) fragment.appendChild(document.createTextNode(name.slice(position)));
+
+    return fragment;
+  }
+
+  /**
+   * One segment split into a cell per word, the chord staying on the word it
+   * was struck over. A cell is the smallest thing the line can wrap between,
+   * so splitting here is what lets a long chordless stretch break at a space
+   * instead of running off a narrow screen.
+   */
+  function wordCells(segment) {
+    var tokens = segment.text.match(/\S+\s*|\s+/g) || [''];
+    return tokens.map(function (token, i) {
+      return { chord: i === 0 ? (segment.chord || '') : '', text: token };
+    });
+  }
+
   function renderChordLine(segments) {
     var line = el('div', 'hn-cline');
+    var cells = [];
     var group = null;
+    var i;
 
-    for (var i = 0; i < segments.length; i++) {
+    for (i = 0; i < segments.length; i++) cells = cells.concat(wordCells(segments[i]));
+
+    for (i = 0; i < cells.length; i++) {
+      if (!cells[i].chord && !cells[i].text) continue;
       if (!group) {
         group = el('div', 'hn-grp');
         line.appendChild(group);
       }
 
+      var name = cells[i].chord;
+      // Room after a name only where another chord follows close enough to run
+      // into it ("BmD"). Everywhere else the lyrics keep their own spacing,
+      // rather than being pushed apart to make room for nothing.
+      var crowded = name && cells[i + 1] && cells[i + 1].chord;
+      var chord = el('span', (name ? 'chord hn-chord' : 'hn-chord') + (crowded ? ' hn-chord-gap' : ''));
+      if (name) chord.appendChild(chordSymbol(name));
+
       var cell = el('div', 'hn-seg');
-      var name = segments[i].chord || '';
-      cell.appendChild(el('span', name ? 'chord hn-chord' : 'hn-chord', name));
-      cell.appendChild(el('span', 'hn-word', segments[i].text));
+      cell.appendChild(chord);
+      cell.appendChild(el('span', 'hn-word', cells[i].text));
       group.appendChild(cell);
 
       // A chord can land inside a word ("a|lone", "Je|sus"), which splits it
-      // into two segments. The line may only wrap where a segment ended on
+      // into two cells. The line may only wrap where a cell ended on
       // whitespace, so a word is never broken across two lines.
-      if (/\s$/.test(segments[i].text)) group = null;
+      if (/\s$/.test(cells[i].text)) group = null;
     }
 
     return line;
@@ -796,6 +871,11 @@
     /* -------- behaviour -------- */
 
     var isOpen = false;
+    // What the reader last asked for, which is not the same as `isOpen`: the
+    // panel also closes on its own in Piano and Guitar mode. Only a click on
+    // the button moves this, so it is what carries over to the next hymn.
+    var wantOpen = false;
+    var userToggled = false;
     var requestToken = 0;
     var originalByMode = {};
 
@@ -1009,9 +1089,11 @@
       button.title = allowed ? '' : 'Multilingual view is available in Text, Text+ and Chords mode.';
       refreshToggles();
       if (!allowed) {
-        if (isOpen) close();
+        if (isOpen) close(); // leaves `wantOpen` alone: the reader did not ask for this
       } else if (isOpen) {
         show();
+      } else if (wantOpen) {
+        open();
       }
     }
 
@@ -1019,6 +1101,11 @@
       event.preventDefault();
       if (button.disabled) return;
       if (isOpen) close(); else open();
+      // Taken from `isOpen` rather than assumed, so a page with no lyrics --
+      // where open() bails out -- is not remembered as open.
+      userToggled = true;
+      wantOpen = isOpen;
+      savePrefs();
     });
 
     select.addEventListener('change', function () {
@@ -1062,14 +1149,17 @@
         gb: choice ? choice.gb : false,
         label: choice ? choice.label : '',
         smartAlign: smartBox.checked,
-        repeatChords: repeatBox.checked
+        repeatChords: repeatBox.checked,
+        multilingual: wantOpen
       });
     }
 
-    // Restore the language and toggles chosen on a previous hymn.
+    // Restore the view, language and toggles chosen on a previous hymn.
     readPrefs().then(function (prefs) {
       if (prefs && prefs.smartAlign) smartBox.checked = true;
       if (prefs && prefs.repeatChords) repeatBox.checked = true;
+      // Unless the reader beat the read to it, in which case their click wins.
+      if (prefs && prefs.multilingual && !userToggled) wantOpen = true;
 
       var match = null;
       if (prefs && prefs.collection) {
@@ -1085,6 +1175,9 @@
       refreshToggles();
       if (repeatBox.checked) repeatChordsOnPage(true);
       if (isOpen) show();
+      // Reopens the panel here if it was left open, but only where the current
+      // format supports it.
+      else if (wantOpen) syncFormat();
     });
 
     syncFormat();
