@@ -38,6 +38,17 @@
     while ((match = re.exec(lower))) groups.push([match.index, match.index + match[0].length]);
     if (!groups.length) return [0];
 
+    // A vowel elided across an apostrophe is sung as one syllable: "o'er",
+    // "e'er", "ne'er". Only where the apostrophe is the whole of the gap --
+    // "ev'ry" and "heav'nly" elide a consonant and keep their two.
+    for (var g = groups.length - 1; g > 0; g--) {
+      var gap = lower.slice(groups[g - 1][1], groups[g][0]);
+      if (gap === '\'' || gap === '’') {
+        groups[g - 1][1] = groups[g][1];
+        groups.splice(g, 1);
+      }
+    }
+
     // A trailing "e" is usually silent: "alone", "loves", "loved". It keeps a
     // syllable of its own in "-le" words ("table"), in "-es" after a sibilant
     // ("roses", "churches"), and in "-ed" after t or d ("tempted", "needed").
@@ -50,7 +61,10 @@
         var stem = lower.slice(0, last[0]);
         var keep;
         if (tail === 's') {
-          keep = /(s|x|z|ch|sh|ge|ce)$/.test(stem);
+          // The stem stops before the "e", so "ages" and "places" are asking
+          // whether it ends in g or c -- spelling "ge" and "ce" out here would
+          // be asking for an "e" that has already been sliced off.
+          keep = /(s|x|z|ch|sh|g|c)$/.test(stem);
         } else if (tail === 'd') {
           keep = /(t|d)$/.test(stem);
         } else {
@@ -185,30 +199,100 @@
   }
 
   /**
-   * How many lines to gather before giving up on finding a group that balances.
-   * A stanza is only ever broken a line or two differently, and a wide window
-   * would start merging lines that differ for a reason.
+   * How many lines either side may contribute to one group. A stanza is only
+   * ever broken a line or two differently, and a wider window would start
+   * merging lines that differ for a reason.
    */
   var MAX_SPAN = 4;
 
   /**
-   * How many of the lines starting at `start` have to be taken together before
-   * the template and the target carry the same number of syllables. Usually
-   * one -- the answer is only larger where the two stanzas were broken into
-   * lines differently.
+   * What one line of a group costs over and above its syllables, so that a
+   * stanza broken exactly as the template is grouped line for line rather than
+   * by some larger grouping that happens to come out level.
    */
-  function balancingSpan(targets, templateLines, start) {
-    var source = 0;
-    var target = 0;
+  var SPAN_COST = 0.1;
 
-    for (var n = 1; n <= MAX_SPAN && start + n <= targets.length; n++) {
-      var k = start + n - 1;
-      if (!templateLines[k]) break;
-      source += syllableStarts(lineText(templateLines[k])).length;
-      target += syllableStarts(targets[k]).length;
-      if (source === target) return n;
+  /**
+   * Match the template's lines against the target's: `span` lines of the one
+   * against `targetSpan` of the other, in the groups whose syllable counts come
+   * closest to level.
+   *
+   * The two sides are not walked in step, because they need not have the same
+   * number of lines at all. The Songbase texts in particular are broken wherever
+   * whoever typed them pressed return, so a stanza printed over four lines is
+   * followed by the same tune printed over six. Walking in step drifts the
+   * moment the counts diverge and then runs off the end of the template, which
+   * is what left the tail of a stanza bare.
+   *
+   * The grouping is chosen for the stanza as a whole rather than a line at a
+   * time, because the two sides are only certain to meet at the end: a group
+   * that looks level on its own can leave the rest of the stanza with no way to
+   * come out even. So this is a walk backwards from the end -- the cost of
+   * matching up what is left from each point, and then the cheapest way in.
+   */
+  function alignLines(templateCounts, targetCounts) {
+    var lines = templateCounts.length;
+    var targets = targetCounts.length;
+    var here, there, span, targetSpan, i;
+
+    // Running totals, so a group's syllables are one subtraction.
+    var templateAt = [0];
+    var targetAt = [0];
+    for (i = 0; i < lines; i++) templateAt.push(templateAt[i] + templateCounts[i]);
+    for (i = 0; i < targets; i++) targetAt.push(targetAt[i] + targetCounts[i]);
+
+    var cost = [];
+    var step = [];
+    for (here = 0; here <= lines; here++) {
+      cost.push([]);
+      step.push([]);
+      for (there = 0; there <= targets; there++) {
+        cost[here].push(Infinity);
+        step[here].push(null);
+      }
     }
-    return 1;
+    cost[lines][targets] = 0;   // both sides run out together, at no cost
+
+    for (here = lines; here >= 0; here--) {
+      for (there = targets; there >= 0; there--) {
+        if (here === lines && there === targets) continue;
+
+        for (span = 1; span <= MAX_SPAN && here + span <= lines; span++) {
+          for (targetSpan = 1; targetSpan <= MAX_SPAN && there + targetSpan <= targets; targetSpan++) {
+            var rest = cost[here + span][there + targetSpan];
+            if (rest === Infinity) continue;
+
+            var source = templateAt[here + span] - templateAt[here];
+            var target = targetAt[there + targetSpan] - targetAt[there];
+            var total = rest + Math.abs(source - target) +
+                        SPAN_COST * (span - 1 + targetSpan - 1);
+
+            if (total < cost[here][there]) {
+              cost[here][there] = total;
+              step[here][there] = [span, targetSpan];
+            }
+          }
+        }
+      }
+    }
+
+    var groups = [];
+    here = 0;
+    there = 0;
+
+    while (here < lines || there < targets) {
+      var take = step[here][there];
+      // No grouping within the window reaches the end -- one side is more than
+      // MAX_SPAN longer than the other. Fall back to line for line, which is
+      // what this did before it could group at all.
+      if (!take) take = [here < lines ? 1 : 0, there < targets ? 1 : 0];
+      if (!take[1]) break;
+      groups.push({ start: here, span: take[0], targetStart: there, targetSpan: take[1] });
+      here += take[0];
+      there += take[1];
+    }
+
+    return groups;
   }
 
   /**
@@ -255,15 +339,15 @@
    * per input line. A line the template has no chords for is still spaced out
    * when it is Chinese, so the whole stanza is set the same way.
    *
-   * The site breaks a stanza into printed lines to fit the page, and it does
-   * not always break two stanzas of the same hymn in the same place -- one may
-   * run seven syllables and then four where another runs five and then six.
-   * The tune does not care; it runs straight through the break. So the lines
-   * are matched in groups: consecutive lines are gathered until the template
-   * and the target come to the same number of syllables, the chords are hung
-   * over the group as one stretch, and the result is cut back into lines
-   * afterwards. Where a line balances on its own, which is the usual case, the
-   * group is that one line and nothing about it changes.
+   * A stanza is broken into printed lines to fit the page, and two stanzas of
+   * the same hymn are not always broken in the same place, nor even into the
+   * same number of lines -- one may run seven syllables and then four where
+   * another runs five and then six, or four lines where another has six. The
+   * tune does not care; it runs straight through the break. So the lines are
+   * matched in groups (see `alignLines`), the chords are hung over each group as
+   * one stretch, and the result is cut back into lines afterwards. Where a line
+   * answers a line, which is the usual case, the group is that one line and
+   * nothing about it changes.
    */
   function buildChordLines(lines, templateLines, options) {
     var space = !options || options.spaceChinese !== false;
@@ -275,34 +359,42 @@
     });
     var inner = { spaceChinese: false };
 
-    var out = [];
-    var i = 0;
+    var groups = alignLines(
+      templateLines.map(function (segments) {
+        return syllableStarts(lineText(segments)).length;
+      }),
+      targets.map(function (line) {
+        return syllableStarts(line).length;
+      })
+    );
 
-    while (i < targets.length) {
-      var span = balancingSpan(targets, templateLines, i);
+    var out = [];
+
+    for (var g = 0; g < groups.length; g++) {
+      var group = groups[g];
       var source = [];
       var texts = [];
       var k;
 
-      for (k = i; k < i + span; k++) {
-        // A space between the lines of a group, so that the last word of one
-        // and the first of the next are not read as a single word.
-        if (k > i) {
-          source.push({ chord: '', text: ' ' });
-          texts.push(' ');
-        }
-        source = source.concat(templateLines[k] || []);
-        texts.push(targets[k]);
+      // A space between the lines of a group, so that the last word of one and
+      // the first of the next are not read as a single word.
+      for (k = 0; k < group.span; k++) {
+        if (k > 0) source.push({ chord: '', text: ' ' });
+        source = source.concat(templateLines[group.start + k] || []);
+      }
+      for (k = 0; k < group.targetSpan; k++) {
+        if (k > 0) texts.push(' ');
+        texts.push(targets[group.targetStart + k]);
       }
 
+      var lines = targets.slice(group.targetStart, group.targetStart + group.targetSpan);
       var built = source.length ? transferChords(source, texts.join(''), inner) : null;
-      var pieces = built ? cutIntoLines(built, targets.slice(i, i + span)) : null;
+      var pieces = built ? cutIntoLines(built, lines) : null;
 
-      for (k = 0; k < span; k++) {
+      for (k = 0; k < group.targetSpan; k++) {
         var segments = pieces && pieces[k] && pieces[k].length ? pieces[k] : null;
-        out.push(segments || [{ chord: '', text: targets[i + k] }]);
+        out.push(segments || [{ chord: '', text: lines[k] }]);
       }
-      i += span;
     }
 
     return out;
