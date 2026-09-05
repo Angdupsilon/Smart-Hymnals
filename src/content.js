@@ -1,11 +1,11 @@
 /*
  * Smart Hymnals
  *
- * Adds smart tools to a hymn page: a "Multilingual" button next to the
- * Text / Text+ / Chords / Piano / Guitar group, chords repeated through every
- * stanza, and Chinese-English line alignment. Clicking the button swaps the
- * single-column lyrics for a two-column view: the page's own language on the
- * left, a translation on the right, chosen with a toggle that sits above the
+ * Adds smart tools to a hymn page: a "Multilingual" button next to the site's
+ * Text / Lead Sheet group, syllable-accurate chords through every stanza, and
+ * Chinese-English line alignment. Clicking the button swaps the single-column
+ * lyrics for a two-column view: the page's own language on the left, a
+ * translation on the right, chosen with a toggle that sits above the
  * right-hand column.
  *
  * Translations are discovered from the coloured hymn-number badges under the
@@ -14,9 +14,10 @@
  * "Languages" list is used only to pick up query-string variants of those same
  * pages (Hymnal.net serves Simplified Chinese as `?gb=1`).
  *
- * The view mirrors whichever of the site's lyric modes is active -- Text,
- * Text+ (chorus after every stanza) or Chords. Piano and Guitar are leadsheet
- * images with no second-language equivalent, so the button greys out there.
+ * The view mirrors the site's own lyric controls: the Text / Lead Sheet pair
+ * and the Repeat Chorus, Show Chords and Repeat Chords checkboxes beneath
+ * them. Lead Sheet is an engraved image with no second-language equivalent,
+ * so the button greys out there.
  */
 
 (function () {
@@ -26,8 +27,6 @@
   window.__hymnalMultilingualLoaded = true;
 
   var PREF_KEY = 'hymnalMultilingualPrefs';
-  var SUPPORTED_FORMATS = ['text', 'textplus', 'chords'];
-  var ALL_FORMATS = ['text', 'textplus', 'chords', 'piano', 'guitar'];
   var pageCache = new Map();
 
   /* ------------------------------------------------------------------ *
@@ -150,8 +149,8 @@
    * Collect the stanzas of a hymn document.
    *
    * Rows marked `js-duplicate-row` are the repeated choruses that the site
-   * reveals only in Text+ mode, so `withRepeats` decides whether to keep them
-   * and the panel matches whichever mode the page is in.
+   * reveals only with Repeat Chorus ticked, so `withRepeats` decides whether to
+   * keep them and the panel matches whatever the page is showing.
    *
    * Each stanza gets a key -- "v3" for verse 3, "c0" for the first chorus --
    * which is what lets two languages with different verse counts line up.
@@ -177,7 +176,10 @@
       var type = node.getAttribute('data-type') || 'verse';
       var numEl = node.querySelector('.verse-num');
       var num = numEl ? numEl.textContent.trim() : '';
-      var chordEl = node.querySelector('.chord-container');
+      // Never a container this extension has rewritten: those keep the site's
+      // own markup parked in a hidden child, which reads back as chordless
+      // lines and would stand in for the repeats that belong there.
+      var chordEl = node.querySelector('.chord-container:not(.hn-injected)');
       var key;
 
       if (type === 'chorus') {
@@ -500,25 +502,57 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Lyrics format
+   * The site's lyric controls
+   *
+   * Hymnal.net used to offer five formats -- Text, Text+, Chords, Piano and
+   * Guitar -- as one button group, so a single reading of `.active` said
+   * everything about what the page was showing. It now offers two buttons and
+   * three checkboxes: Piano and Guitar became one transposable Lead Sheet,
+   * Text+ became "Repeat Chorus", Chords became "Show Chords", and the site
+   * grew a "Repeat Chords" of its own. Format and toggles are therefore read
+   * separately, and always from the page rather than from a copy kept here,
+   * so the panel mirrors whatever the reader has switched on.
    * ------------------------------------------------------------------ */
 
-  /** Which of the site's five lyric modes is showing. */
+  /** The site's format buttons, by the class each one carries. */
+  var FORMAT_BUTTONS = { text: 'text', leadsheet: 'score' };
+
   function currentFormat() {
     var active = document.querySelector('.lyrics-format button.active');
     if (active) {
-      for (var i = 0; i < ALL_FORMATS.length; i++) {
-        if (active.classList.contains(ALL_FORMATS[i])) return ALL_FORMATS[i];
+      for (var format in FORMAT_BUTTONS) {
+        if (active.classList.contains(FORMAT_BUTTONS[format])) return format;
       }
     }
     try {
-      if (ALL_FORMATS.indexOf(localStorage.lyricsFormat) !== -1) return localStorage.lyricsFormat;
+      if (FORMAT_BUTTONS[localStorage.lyricsFormat]) return localStorage.lyricsFormat;
     } catch (e) { /* localStorage may be unavailable */ }
     return 'text';
   }
 
+  /**
+   * One of the site's lyric checkboxes. The element is the truth once the page
+   * has run, since the site ticks the boxes from localStorage on load; reading
+   * the same key is the fallback for the moment before that, and for a page
+   * that renders no toggle row at all.
+   */
+  function siteToggle(selector, storageKey) {
+    var box = document.querySelector(selector);
+    if (box) return box.checked;
+    try {
+      return localStorage[storageKey] === 'true';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function showChords() { return siteToggle('.toggle-show-chords', 'showChords'); }
+  function repeatChorus() { return siteToggle('.toggle-repeat-chorus', 'repeatChorus'); }
+  function repeatChords() { return siteToggle('.toggle-repeat-chords', 'repeatChords'); }
+
+  /** Lead Sheet is an engraved image, so only Text has a two-column form. */
   function isSupportedFormat(format) {
-    return SUPPORTED_FORMATS.indexOf(format) !== -1;
+    return format === 'text';
   }
 
   /* ------------------------------------------------------------------ *
@@ -543,8 +577,8 @@
         // key the page was printed in -- `#fromkeysig`, not `#keysig`.
         var keyEl = doc.querySelector('#fromkeysig') || doc.querySelector('#keysig');
         var data = {
-          text: plain,
-          textplus: parseStanzas(doc, true) || plain,
+          plain: plain,
+          repeat: parseStanzas(doc, true) || plain,
           title: titleEl ? titleEl.textContent.trim() : '',
           key: keyEl ? keyRoot(keyEl.textContent) : ''
         };
@@ -698,66 +732,125 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Repeating chords on the site's own lyrics
+   * Sharpening the site's repeated chords
    *
-   * Hymnal.net prints chords over the first verse and the first chorus only;
-   * every later stanza repeats the bare words. This rewrites those stanzas in
-   * place so the chords carry through the whole hymn, and keeps the originals
-   * so the page can be put back exactly as it was.
+   * Hymnal.net now carries verse one's chords through the later stanzas
+   * itself, rendering them into a second `.repeat-chord-container` beside each
+   * stanza's plain one and swapping the two with its "Repeat Chords" box. It
+   * places them by word, though, so a chord falling inside a word lands at the
+   * start of it and two chords sharing a word are printed together: verse 2 of
+   * 787 comes out "[A]He will [Bm D]deliver," where the metre puts them on
+   * "de[Bm]li[D]ver,".
+   *
+   * This extension places chords by syllable, which is the coordinate stanzas
+   * of a shared metre actually have in common. Rather than offering a second
+   * control saying the same thing as the site's, it rewrites the site's own
+   * containers in place: the site's checkbox stays in charge of whether the
+   * repeats show at all, and only their placement changes.
    * ------------------------------------------------------------------ */
-
-  var stashed = new WeakMap();
 
   function siteStanzas() {
     var article = document.querySelector('.hymn-content .lyrics article.js-stanzas');
     return article ? article.querySelectorAll('.verse') : [];
   }
 
-  function repeatChordsOnPage(enable) {
+  /**
+   * Where a stanza's repeated chords should be drawn, or null for the stanzas
+   * that need none -- the ones the site chorded from the hymnal itself.
+   */
+  function repeatTarget(verse) {
+    var repeat = verse.querySelector('.repeat-chord-container');
+    if (repeat) return repeat;
+    // Not every hymn gets a repeat container: where the site has none it
+    // leaves the plain container on show instead, and chords can go there so
+    // long as it is one the site did not chord itself.
+    var plain = verse.querySelector('.chord-container');
+    return plain && !plain.querySelector('.chord') ? plain : null;
+  }
+
+  /**
+   * Put a container back the way the site rendered it.
+   *
+   * The originals are parked in a hidden child rather than detached, because
+   * the site transposes with a document-wide `$(".chord").each(...)`: a
+   * detached copy would sit out every key change and come back in the wrong
+   * key, while a hidden one is retuned along with everything else.
+   */
+  function restoreContainer(container) {
+    var keep = null;
+    var child = container.firstChild;
+
+    while (child) {
+      var next = child.nextSibling;
+      if (child.nodeType === Node.ELEMENT_NODE && child.classList.contains('hn-original')) keep = child;
+      else container.removeChild(child);
+      child = next;
+    }
+
+    if (keep) {
+      while (keep.firstChild) container.insertBefore(keep.firstChild, keep);
+      container.removeChild(keep);
+    }
+    container.classList.remove('hn-injected');
+  }
+
+  function refineRepeatChords(enable) {
     var verses = siteStanzas();
     var templates = {};
-    var i, container, type;
+    var i, verse, target, type;
 
-    // Templates come only from stanzas the site itself chorded, never from one
-    // this function wrote earlier.
+    // Templates come only from the stanzas the site chorded from the hymnal --
+    // the first verse and the first chorus -- never from one written here.
     for (i = 0; i < verses.length; i++) {
-      container = verses[i].querySelector('.chord-container');
-      if (!container || container.classList.contains('hn-injected')) continue;
+      var source = verses[i].querySelector('.chord-container:not(.repeat-chord-container)');
+      if (!source || source.classList.contains('hn-injected')) continue;
       type = verses[i].getAttribute('data-type') || 'verse';
       if (templates[type]) continue;
-      var parsed = extractChordLines(container);
+      var parsed = extractChordLines(source);
       if (parsed) templates[type] = parsed;
     }
 
     for (i = 0; i < verses.length; i++) {
-      container = verses[i].querySelector('.chord-container');
-      if (!container) continue;
-      type = verses[i].getAttribute('data-type') || 'verse';
+      verse = verses[i];
+      target = repeatTarget(verse);
+      if (!target) continue;
+      type = verse.getAttribute('data-type') || 'verse';
 
-      if (container.classList.contains('hn-injected')) {
-        if (enable) continue; // already done
-        var original = stashed.get(container);
-        container.textContent = '';
-        if (original) container.appendChild(original.cloneNode(true));
-        container.classList.remove('hn-injected');
+      if (target.classList.contains('hn-injected')) {
+        if (!enable) restoreContainer(target);
         continue;
       }
 
-      if (!enable) continue;
-      if (container.querySelector('.chord')) continue; // the site chorded this one
-      if (!templates[type]) continue;
+      if (!enable || !templates[type]) continue;
 
-      var textEl = verses[i].querySelector('.text-container');
+      var textEl = verse.querySelector('.text-container');
       var lines = textEl ? extractLines(textEl) : null;
       if (!lines || !lines.length) continue;
 
-      var keep = document.createDocumentFragment();
-      while (container.firstChild) keep.appendChild(container.firstChild);
-      stashed.set(container, keep);
+      var keep = el('div', 'hn-original hn-hidden');
+      while (target.firstChild) keep.appendChild(target.firstChild);
+      target.appendChild(keep);
 
       var built = buildChordLines(lines, templates[type]);
-      for (var k = 0; k < built.length; k++) container.appendChild(renderChordLine(built[k]));
-      container.classList.add('hn-injected');
+      for (var k = 0; k < built.length; k++) target.appendChild(renderChordLine(built[k]));
+      target.classList.add('hn-injected');
+    }
+  }
+
+  /**
+   * Follow the site's "Repeat Chords" box for as long as the page lives.
+   *
+   * Kept apart from the panel because it applies to every hymn, including the
+   * ones with nothing to translate into -- and because it belongs to the
+   * site's own chord sheet rather than to the two-column view.
+   */
+  function followRepeatChords() {
+    var box = document.querySelector('.toggle-repeat-chords');
+    // The site has already ticked its boxes from localStorage by now, so the
+    // repeats it is showing can be sharpened straight away.
+    refineRepeatChords(repeatChords());
+    if (box) {
+      box.addEventListener('change', function () { refineRepeatChords(box.checked); });
     }
   }
 
@@ -765,6 +858,8 @@
     var formatRow = document.querySelector('.row.text-center .lyrics-format');
     var hymnContent = document.querySelector('.hymn-content');
     if (!hymnContent) return;
+
+    followRepeatChords();
 
     var languages = discoverLanguages();
     if (!languages.length) return; // nothing to compare against
@@ -781,17 +876,6 @@
     button.setAttribute('aria-pressed', 'false');
     group.appendChild(button);
 
-    // "Repeat chords" lives out here beside the format buttons rather than
-    // inside the panel, because it applies to the site's own single-column
-    // chord sheet just as much as to the two-column view.
-    var repeatWrap = el('label', 'hn-toggle hn-page-toggle hn-hidden');
-    var repeatBox = document.createElement('input');
-    repeatBox.type = 'checkbox';
-    repeatBox.className = 'hn-repeat-box';
-    repeatWrap.appendChild(repeatBox);
-    repeatWrap.appendChild(el('span', null, 'Repeat chords'));
-    repeatWrap.title = 'Carry the first stanza’s chords onto the later stanzas, matched syllable by syllable.';
-
     /* Everything this extension adds is gathered into one strip, set off from
      * the site's own format buttons by a divider, so it reads as belonging to
      * the extension rather than to Hymnal.net. The feedback link sits here for
@@ -799,7 +883,6 @@
      * find and easy to mistake for part of the site. */
     var controls = el('span', 'hn-controls');
     controls.appendChild(group);
-    controls.appendChild(repeatWrap);
 
     var feedback = buildFeedback();
     controls.appendChild(feedback.toggle);
@@ -807,8 +890,11 @@
     var row = formatRow && formatRow.parentNode ? formatRow.parentNode : null;
     if (row) {
       row.appendChild(controls);
-      // The form drops in directly under the strip that opened it.
-      row.parentNode.insertBefore(feedback.form, row.nextSibling);
+      // The form drops in under the strip that opened it -- below the site's
+      // own toggle row, where that follows, rather than splitting the two.
+      var toggleRow = document.querySelector('.text-toggles');
+      var after = toggleRow && toggleRow.parentNode === row.parentNode ? toggleRow : row;
+      row.parentNode.insertBefore(feedback.form, after.nextSibling);
     } else {
       hymnContent.parentNode.insertBefore(controls, hymnContent);
       hymnContent.parentNode.insertBefore(feedback.form, hymnContent);
@@ -824,19 +910,12 @@
     var leftHead = el('div', 'hn-head hn-head-left');
     leftHead.appendChild(el('span', 'hn-head-label', here.label));
 
-    // The transpose control sits inside .hymn-content, which is hidden while
-    // the panel is open, so it is borrowed into the panel heading and returned
-    // on close. Moving the element keeps the site's own click handlers on it,
-    // and because every chord rendered here carries the site's `chord` class,
-    // its retune reaches both columns at once.
-    var keySig = document.querySelector('.hymn-content .key-sig');
-    var keySigHome = null;
-    var keySigHadRow = false;
-    if (keySig && keySig.parentNode) {
-      keySigHome = document.createComment('hn-keysig');
-      keySig.parentNode.insertBefore(keySigHome, keySig);
-      keySigHadRow = keySig.classList.contains('row');
-    }
+    // The transpose control used to be borrowed into this heading, because it
+    // sat inside .hymn-content and went away with it when the panel opened. It
+    // now lives up in the site's own format row, which stays on show, so it is
+    // left where it is -- and left to the site to hide and reveal. Every chord
+    // drawn here still carries the site's `chord` class, so one press of it
+    // retunes both columns along with the page.
 
     var rightHead = el('div', 'hn-head hn-head-right');
     var select = el('select', 'hn-select');
@@ -890,44 +969,22 @@
       return null;
     }
 
-    function mode() {
-      var format = currentFormat();
-      return isSupportedFormat(format) ? format : 'text';
-    }
-
     function refreshToggles() {
-      var chords = currentFormat() === 'chords';
       smartWrap.classList.toggle('hn-hidden', chineseSide() === null);
-      repeatWrap.classList.toggle('hn-hidden', !chords);
-      if (keySig && keySig.parentNode === leftHead) keySig.classList.toggle('hidden', !chords);
     }
 
-    function borrowKeySig() {
-      if (!keySig || keySig.parentNode === leftHead) return;
-      // The control also carries Bootstrap's `row` class, which the site styles
-      // with `body.hymn .common-panel:first-child .row { margin-top: 20px }`.
-      // A top margin is applied before flex centring, so it would sit ~10px
-      // below the language label and stretch the heading. Dropping the class
-      // while borrowed is cleaner than out-specifying that rule; it goes back
-      // on return, leaving the site's own layout untouched.
-      if (keySigHadRow) keySig.classList.remove('row');
-      leftHead.appendChild(keySig);
-    }
-
-    function returnKeySig() {
-      if (!keySig || !keySigHome || keySig.parentNode !== leftHead) return;
-      keySigHome.parentNode.insertBefore(keySig, keySigHome);
-      if (keySigHadRow) keySig.classList.add('row');
-      keySig.classList.toggle('hidden', currentFormat() !== 'chords');
-    }
-
+    /**
+     * Which reading of the stanzas the panel is showing: "repeat" keeps the
+     * site's `js-duplicate-row` choruses, so the chorus follows every verse,
+     * and "plain" drops them. It tracks the site's own Repeat Chorus box.
+     */
     function stanzaSet() {
-      return mode() === 'textplus' ? 'textplus' : 'text';
+      return repeatChorus() ? 'repeat' : 'plain';
     }
 
     function originalStanzas() {
       var set = stanzaSet();
-      if (!originalByMode[set]) originalByMode[set] = parseStanzas(document, set === 'textplus');
+      if (!originalByMode[set]) originalByMode[set] = parseStanzas(document, set === 'repeat');
       return originalByMode[set];
     }
 
@@ -947,12 +1004,12 @@
 
     /**
      * Chord lines for a stanza: its own if the page supplies them, otherwise
-     * the template's chords re-hung over its words -- but only when "Repeat
-     * chords" is on, since by default the site simply prints the bare words.
+     * the template's chords re-hung over its words -- but only when the site's
+     * "Repeat Chords" is on, since otherwise it prints the bare words.
      */
     function chordLinesFor(stanza, template) {
       if (stanza.chordLines) return stanza.chordLines;
-      if (!repeatBox.checked || !template || !template.chordLines) return null;
+      if (!repeatChords() || !template || !template.chordLines) return null;
 
       return buildChordLines(stanza.lines, template.chordLines);
     }
@@ -976,7 +1033,7 @@
     function render(translation) {
       body.textContent = '';
 
-      var chordsMode = mode() === 'chords';
+      var chordsMode = showChords();
       var leftStanzas = originalStanzas();
       var rightStanzas = translation[stanzaSet()];
       var rows = alignStanzas(leftStanzas, rightStanzas);
@@ -1063,8 +1120,8 @@
       button.setAttribute('aria-pressed', 'true');
       hymnContent.classList.add('hn-hidden');
       panel.classList.remove('hn-hidden');
-      borrowKeySig();
       refreshToggles();
+      resyncColumnToggle();
       show();
     }
 
@@ -1073,20 +1130,33 @@
       requestToken++;
       button.classList.remove('hn-on');
       button.setAttribute('aria-pressed', 'false');
-      returnKeySig();
       hymnContent.classList.remove('hn-hidden');
       panel.classList.add('hn-hidden');
+      resyncColumnToggle();
     }
 
     /**
-     * Keep in step with the site's format buttons. Text, Text+ and Chords all
-     * have a two-column equivalent, so the panel stays open and re-renders;
-     * Piano and Guitar are leadsheet images, so it closes and the button greys.
+     * Nudge the site into re-deciding whether its one/two-column control
+     * applies. That control belongs to the single-column lyrics, which are
+     * hidden while the panel is open; the site works out whether to offer it
+     * by measuring them, and only ever re-measures on a window resize. Firing
+     * one is how it is asked to look again -- through the site's own path,
+     * rather than by reaching into its state.
+     */
+    function resyncColumnToggle() {
+      if (!document.querySelector('.column-toggle')) return;
+      window.dispatchEvent(new Event('resize'));
+    }
+
+    /**
+     * Keep in step with the site's format buttons. Text has a two-column
+     * equivalent, so the panel stays open and re-renders; Lead Sheet is an
+     * engraved image, so it closes and the button greys.
      */
     function syncFormat() {
       var allowed = isSupportedFormat(currentFormat());
       button.disabled = !allowed;
-      button.title = allowed ? '' : 'Multilingual view is available in Text, Text+ and Chords mode.';
+      button.title = allowed ? '' : 'Multilingual view is available in Text mode.';
       refreshToggles();
       if (!allowed) {
         if (isOpen) close(); // leaves `wantOpen` alone: the reader did not ask for this
@@ -1119,12 +1189,6 @@
       if (isOpen) show();
     });
 
-    repeatBox.addEventListener('change', function () {
-      savePrefs();
-      repeatChordsOnPage(repeatBox.checked);
-      if (isOpen) show();
-    });
-
     // Transposing rewrites every `.chord` in the document, including the ones
     // rendered here, so the view needs no redraw -- but the parsed copy held in
     // memory is now a key behind, so it is dropped.
@@ -1136,10 +1200,27 @@
     }
 
     // The site's own handler runs first and sets `.active`, so by the time this
-    // fires `currentFormat()` already reports the newly chosen mode.
+    // fires `currentFormat()` already reports the newly chosen format.
     var formatButtons = document.querySelectorAll('.lyrics-format button');
     for (var b = 0; b < formatButtons.length; b++) {
       formatButtons[b].addEventListener('click', syncFormat);
+    }
+
+    /* Repeat Chorus, Show Chords and Repeat Chords all change what the panel
+     * should be showing. These listeners are added after the site's own and
+     * after followRepeatChords(), so the page has already settled into its new
+     * state by the time the panel reads it back. */
+    function syncToggles() {
+      // Repeat Chorus changes which stanzas the page offers, so the parsed
+      // copy is dropped rather than reused.
+      originalByMode = {};
+      if (isOpen) show();
+    }
+
+    var siteToggles = document.querySelectorAll(
+      '.toggle-show-chords, .toggle-repeat-chorus, .toggle-repeat-chords');
+    for (var s = 0; s < siteToggles.length; s++) {
+      siteToggles[s].addEventListener('change', syncToggles);
     }
 
     function savePrefs() {
@@ -1149,15 +1230,15 @@
         gb: choice ? choice.gb : false,
         label: choice ? choice.label : '',
         smartAlign: smartBox.checked,
-        repeatChords: repeatBox.checked,
         multilingual: wantOpen
       });
     }
 
-    // Restore the view, language and toggles chosen on a previous hymn.
+    // Restore the view, language and toggles chosen on a previous hymn. A
+    // `repeatChords` left here by an older version is ignored and dropped on
+    // the next write: the site owns that choice now.
     readPrefs().then(function (prefs) {
       if (prefs && prefs.smartAlign) smartBox.checked = true;
-      if (prefs && prefs.repeatChords) repeatBox.checked = true;
       // Unless the reader beat the read to it, in which case their click wins.
       if (prefs && prefs.multilingual && !userToggled) wantOpen = true;
 
@@ -1173,7 +1254,6 @@
       if (match) select.value = match.url;
 
       refreshToggles();
-      if (repeatBox.checked) repeatChordsOnPage(true);
       if (isOpen) show();
       // Reopens the panel here if it was left open, but only where the current
       // format supports it.

@@ -201,8 +201,8 @@
   outline-offset: 1px;
 }
 
-/* Toggles sit beside the language menu. Each appears only when it applies:
- * Smart align when a column is Chinese, Repeat chords in Chords mode. */
+/* Smart align sits beside the language menu, and only when it applies --
+ * that is, when one of the two columns is Chinese. */
 .hn-toggle {
   display: inline-flex;
   align-items: center;
@@ -219,30 +219,6 @@
 .hn-toggle input {
   margin: 0;
   cursor: pointer;
-}
-
-/* "Repeat chords" sits beside the format buttons rather than in the panel,
- * since it applies to the site's own chord sheet too. */
-.hn-page-toggle {
-  margin-left: 14px;
-  vertical-align: middle;
-}
-
-/* The borrowed transpose control, while it is living in the panel heading.
- * `align-self` and the zeroed margins keep it on the same centre line as the
- * language label; the site's own 20px row margin is shed in borrowKeySig(). */
-.hn-head .key-sig {
-  display: inline-flex;
-  align-items: center;
-  align-self: center;
-  gap: 6px;
-  margin: 0 0 0 14px;
-  padding: 0;
-  line-height: 1;
-}
-
-.hn-head .key-sig.hidden {
-  display: none;
 }
 
 /* Status line spans both columns. */

@@ -3,12 +3,14 @@
 A Chrome extension that adds smart tools to hymn pages on
 [hymnal.net](https://www.hymnal.net):
 
-- **Multilingual lyrics** — a button beside the site's Text / Text+ / Chords /
-  Piano / Guitar controls shows the hymn in two columns: the page's own language
-  on the left, any available translation on the right, chosen with a dropdown
-  above the right column.
-- **Repeat chords** — carries the chords printed over verse 1 through every
-  stanza of the hymn, whether or not the multilingual view is open.
+- **Multilingual lyrics** — a button beside the site's Text / Lead Sheet
+  controls shows the hymn in two columns: the page's own language on the left,
+  any available translation on the right, chosen with a dropdown above the
+  right column. It follows the site's Repeat Chorus and Show Chords boxes, so
+  both columns always show what the page is showing.
+- **Sharper repeat chords** — Hymnal.net repeats verse one's chords through the
+  later stanzas by word; this places them by syllable instead, which is what
+  stanzas of a shared metre actually have in common.
 - **Smart align** — merges Chinese lines so the columns read across line for
   line against an English translation.
 - **Transposing** — the site's key control keeps working, retuning both columns
@@ -30,33 +32,49 @@ the folder directly:
 4. Open any hymn page, e.g. <https://www.hymnal.net/en/hymn/h/787>, or any
    Songbase song, e.g. <https://songbase.life/songs/1>.
 
-The **Multilingual** button appears next to Text / Text+ / Chords / Piano /
-Guitar. It is only added when the hymn actually has a translation to show.
+The **Multilingual** button appears next to Text / Lead Sheet. It is only added
+when the hymn actually has a translation to show.
 
 ## Lyric modes
 
-The panel mirrors whichever of the site's lyric modes is active, in both columns
-at once:
+Hymnal.net's September 2026 update replaced its five-button format group — Text,
+Text+, Chords, Piano, Guitar — with two buttons and three checkboxes. Piano and
+Guitar became one transposable **Lead Sheet**; Text+ became **Repeat Chorus**,
+Chords became **Show Chords**, and the site added a **Repeat Chords** of its
+own. This extension reads those controls rather than keeping its own copy, so
+the panel mirrors whatever the reader has switched on:
 
-- **Text** — each stanza once, the chorus in its printed position.
-- **Text+** — the chorus repeated after every stanza, matching what the site
-  does when it unhides its `js-duplicate-row` rows.
-- **Chords** — chords stacked over the words, in both languages.
+- **Repeat Chorus** — the chorus after every stanza, matching what the site does
+  when it unhides its `js-duplicate-row` rows.
+- **Show Chords** — chords stacked over the words, in both languages.
 
-Switching between them while the panel is open re-renders it in place. The
-button is greyed out only in **Piano** and **Guitar**, which are leadsheet
-images with no second-language equivalent; choosing one closes the panel and
-hands the page back to the site.
+Ticking either while the panel is open re-renders it in place. The button is
+greyed out in **Lead Sheet**, which is an engraved image with no second-language
+equivalent; choosing it closes the panel and hands the page back to the site.
 
 ## Repeat chords
 
-Hymnal.net prints chords over the first verse and the first chorus only — every
-later stanza repeats the bare words. **Repeat chords**, beside the format
-buttons, carries those chords through the whole hymn.
+Hymnal.net prints chords over the first verse and the first chorus only. It now
+carries them through the later stanzas itself, rendering them into a second
+`.repeat-chord-container` beside each stanza's plain one and swapping the two
+with its **Repeat Chords** box.
 
-It sits outside the panel on purpose: it works on the site's own single-column
-chord sheet whether or not the multilingual view is open, rewriting the later
-stanzas in place and restoring them exactly when switched off.
+It places them by word, though. A chord falling inside a word lands at the start
+of it, and two chords sharing a word are printed together — verse 2 of 787 comes
+out `[A]He will [Bm D]deliver,` where the metre puts them on `de[Bm]li[D]ver,`.
+Hymn 1 verse 5 is starker: `[E♭ E♭7 A♭]Worshippers!` against a first verse that
+sings `[E♭]Ev [E♭7]er [A♭]One.`
+
+Rather than offering a second control saying the same thing as the site's, this
+extension rewrites the site's own containers in place, by syllable:
+`[E♭]Wors[E♭7]hip[A♭]pers!`. The site's checkbox stays in charge of whether the
+repeats show at all — only their placement changes — and unticking it restores
+the site's markup exactly.
+
+The originals are parked in a hidden child of the container rather than
+detached, because the site transposes with a document-wide
+`$(".chord").each(...)`: a detached copy would sit out every key change and come
+back in the wrong key, while a hidden one is retuned along with everything else.
 
 Chords are placed by **syllable**, not by character position. Hymn stanzas share
 a metre — 787 is 10.9.10.9 — so the nth syllable of a line falls on the same
@@ -82,9 +100,11 @@ split such as `dis|tress` against `dist|ress`.
 
 ## Transposing
 
-The site's key up/down control keeps working while the panel is open — it is
-borrowed into the panel's heading and returned when the panel closes, so its own
-click handlers stay attached.
+The site's key up/down control keeps working while the panel is open. It used to
+be borrowed into the panel's heading, because it sat inside `.hymn-content` and
+went away with it; the update moved it up into the site's own format row, which
+stays on show, so it is now left where it is and left to the site to hide and
+reveal.
 
 Every chord this extension draws is tagged with the site's `chord` class, and
 the site transposes with a document-wide `$(".chord").each(...)`, so one press
@@ -126,8 +146,9 @@ are stanzas with no counterpart opposite.
 
 ## Remembering your choice
 
-The chosen language, Smart align and Repeat chords are saved with
-`chrome.storage.local` and restored on the next hymn you open.
+The chosen language and Smart align are saved with `chrome.storage.local` and
+restored on the next hymn you open. Repeat Chorus, Show Chords and Repeat Chords
+belong to the site, which remembers them in its own `localStorage`.
 
 The language is remembered by hymnal — the `ch` in `/en/hymn/ch/572`, plus the
 Simplified flag — rather than by its display name, because the same language is
@@ -188,8 +209,8 @@ blank. Each stanza pair is its own CSS grid row, so the two columns stay aligned
 even when the translation runs much longer than the original.
 
 Repeated choruses marked `js-duplicate-row` are kept or dropped according to
-whether the page is in Text+ or Text, so both columns show the hymn in the same
-shape the site would.
+the site's Repeat Chorus box, so both columns show the hymn in the same shape
+the site would.
 
 ## Notes on fitting in with the site
 
@@ -200,11 +221,16 @@ shape the site would.
 - The panel is a **sibling** of `.hymn-content`, not a child, because the site
   runs `$(".hymn-content > div").addClass("hidden")` whenever a format button is
   pressed.
-- Pressing Text or Text+ re-renders the panel in that mode; pressing Chords,
-  Piano or Guitar closes it and restores the normal view, rather than leaving
-  two lyric displays fighting over the page. The site's own handler runs first
-  and sets `.active`, so by the time this extension's listener fires the newly
-  chosen mode is already readable from the DOM.
+- Ticking Repeat Chorus or Show Chords re-renders the panel; pressing Lead
+  Sheet closes it and restores the normal view, rather than leaving two lyric
+  displays fighting over the page. The site's own handlers run first, so by the
+  time this extension's listeners fire the page has already settled into its new
+  state and can simply be read back.
+- The one/two-column control belongs to the single-column lyrics, which are
+  hidden while the panel is open. The site decides whether to offer it by
+  measuring them, and only re-measures on a window resize, so opening and
+  closing the panel fires one — asking through the site's own path rather than
+  reaching into its state.
 - The pressed state uses its own `hn-on` class instead of Bootstrap's `active`,
   because the site ships `.btn-default.active { background: … !important }` —
   which in light mode paints the button plain white and makes "on" invisible.
@@ -384,8 +410,10 @@ tools/make_icons.py    regenerates icons/ (standard library only)
   from another language's page.
 - The Portuguese translation lives on hinario.org and is not shown, since
   reading it would mean granting the extension access to a second site.
-- Piano and guitar leadsheets are images, so they are left to the site's own
-  buttons.
+- The lead sheet is an engraved image, so it is left to the site's own button.
+- Repeat chords are placed from the whole stanza's syllable stream, so a line
+  the estimator over-counts can pull the next line's first chord back onto it.
+  Hymn 1 verse 5 loses its third line's opening `A♭` this way.
 - Smart align only merges lines, so it can bring a longer Chinese stanza down to
   the line count opposite but cannot split a shorter one to match a longer
   translation.
