@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Smart Hymnals",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Smart tools for hymn pages: multilingual lyrics side by side, syllable-accurate repeat chords, and Chinese-English alignment.",
   "icons": {
     "16": "icons/icon16.png",

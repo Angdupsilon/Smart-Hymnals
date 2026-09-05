@@ -859,6 +859,18 @@
     var hymnContent = document.querySelector('.hymn-content');
     if (!hymnContent) return;
 
+    /* What the panel stands in for while it is open.
+     *
+     * Only the single-column lyrics, never the whole `.hymn-content` -- the
+     * lead sheet is their sibling inside it, and the site sizes its engraving
+     * once, from `$(".leadsheet").width()` read the moment the button is
+     * pressed. The site's own handler runs before this extension's, so hiding
+     * the block would have that measurement taken inside `display: none`: the
+     * sheet came out 30px wide and stayed there, since nothing re-measures it
+     * afterwards. Hiding the lyrics alone leaves the block laid out, and the
+     * site keeps `hidden` on everything else in it anyway. */
+    var siteLyrics = hymnContent.querySelector('.lyrics') || hymnContent;
+
     followRepeatChords();
 
     var languages = discoverLanguages();
@@ -1118,7 +1130,7 @@
       isOpen = true;
       button.classList.add('hn-on');
       button.setAttribute('aria-pressed', 'true');
-      hymnContent.classList.add('hn-hidden');
+      siteLyrics.classList.add('hn-hidden');
       panel.classList.remove('hn-hidden');
       refreshToggles();
       resyncColumnToggle();
@@ -1130,7 +1142,7 @@
       requestToken++;
       button.classList.remove('hn-on');
       button.setAttribute('aria-pressed', 'false');
-      hymnContent.classList.remove('hn-hidden');
+      siteLyrics.classList.remove('hn-hidden');
       panel.classList.add('hn-hidden');
       resyncColumnToggle();
     }

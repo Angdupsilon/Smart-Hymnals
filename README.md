@@ -221,6 +221,14 @@ the site would.
 - The panel is a **sibling** of `.hymn-content`, not a child, because the site
   runs `$(".hymn-content > div").addClass("hidden")` whenever a format button is
   pressed.
+- While the panel is open it hides `.hymn-content .lyrics`, **not**
+  `.hymn-content` itself. The lead sheet is the lyrics' sibling inside that
+  block, and the site sizes its engraving once, from `$(".leadsheet").width()`
+  read the instant the button is pressed. The site's handler runs before this
+  extension's, so hiding the whole block had that measurement taken inside
+  `display: none` -- the sheet came out 30px wide and stayed there, since
+  nothing re-measures it afterwards. Hiding the lyrics alone leaves the block
+  laid out; the site keeps `hidden` on everything else in it anyway.
 - Ticking Repeat Chorus or Show Chords re-renders the panel; pressing Lead
   Sheet closes it and restores the normal view, rather than leaving two lyric
   displays fighting over the page. The site's own handlers run first, so by the
